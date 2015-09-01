@@ -41,7 +41,7 @@ from scipy.signal import convolve2d
 # local package imports
 from . import set_pars
 from . import ps_model
-from . import statistics
+from . import utils
 
 # get module logger
 def trace(self, message, *args, **kwargs):
@@ -1430,8 +1430,8 @@ class PointSourceLLH(object):
             for i in xrange(1, maxtrial + 1):
                 # use existing scrambles to determine best starting point
                 fun = lambda n: np.log10(
-                                    (statistics.poisson_percentile(
-                                            n, mu, mu_TS, TSval)[0]
+                                    (utils.poisson_percentile(n, mu, mu_TS,
+                                                              TSval)[0]
                                      - beta)**2)
 
                 # do not fit values too high for sampled distributions
@@ -1455,9 +1455,7 @@ class PointSourceLLH(object):
                 mu_eff = np.asscalar(x)
 
                 # get the statistical uncertainty of the quantile
-                b, b_err = statistics.poisson_percentile(mu_eff,
-                                                         mu, mu_TS,
-                                                         TSval)
+                b, b_err = utils.poisson_percentile(mu_eff, mu, mu_TS, TSval)
 
                 print("\t\tBest estimate: {0:6.2f}, ({1:7.2%} +/- {2:8.3%})".format(
                             mu_eff, b, b_err))
@@ -1565,10 +1563,10 @@ class PointSourceLLH(object):
                     print("Fit background function to scrambles")
                     if self.rho_nsource_bounds[0] < 0:
                         print("Fit two sided chi2 to background scrambles")
-                        fitfun = statistics.twoside_chi2
+                        fitfun = utils.twoside_chi2
                     else:
                         print("Fit delta chi2 to background scrambles")
-                        fitfun = statistics.delta_chi2
+                        fitfun = utils.delta_chi2
                     fit = fitfun(bckg_trials["TS"], df=2.,
                                  floc=0., fscale=1.)
 

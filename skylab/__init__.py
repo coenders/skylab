@@ -35,12 +35,12 @@ Requirements
 
 Contents
 --------
-    statistics  -   Some statistic functions not included in numpy/scipy
-    coords      -   Coordinate calculation on numpy arrays
     psLLH       -   Pointsource Likelihood calculation and sensitivity
                     calculation
     ps_model    -   Likelihood models for use in psLLH
     ps_injector -   Source injectors for use in psLLH sensitivity estimation
+    utils       -   Helping functions for other content that is not supported
+                    in other libraries
 
 """
 

@@ -45,7 +45,7 @@ import scipy.interpolate
 
 # local package imports
 from . import set_pars
-from .coords import rotate
+from .utils import rotate
 
 # get module logger
 def trace(self, message, *args, **kwargs):
@@ -65,7 +65,7 @@ _deg = 4
 _ext = 3
 
 def rotate_struct(ev, ra, dec):
-    r"""Wrapper around the rotate-method in skylab.coords for structured
+    r"""Wrapper around the rotate-method in skylab.utils for structured
     arrays.
 
     Parameters
