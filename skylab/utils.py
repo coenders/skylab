@@ -304,32 +304,58 @@ class twoside_chi2(object):
 
 
 def rotate(ra1, dec1, ra2, dec2, ra3, dec3):
-    r""" Rotate ra1 and dec1 in a way that ra2 and dec2 will exactly map
-    onto ra3 and dec3, respectively. All angles are treated as radians.
+    r"""Rotation matrix for rotation of (ra1, dec1) onto (ra2, dec2). The
+    rotation is performed on (ra3, dec3).
 
     """
+    def cross_matrix(x):
+        r"""Calculate cross product matrix
 
-    # turn rightascension and declination into zenith and azimuth for healpy
-    phi1 = ra1 - np.pi
-    zen1 = np.pi/2. - dec1
-    phi2 = ra2 - np.pi
-    zen2 = np.pi/2. - dec2
-    phi3 = ra3 - np.pi
-    zen3 = np.pi/2. - dec3
+        A[ij] = x_i * y_j - y_i * x_j
 
-    # rotate each ra1 and dec1 towards the pole
-    x = np.array([hp.rotator.rotateDirection(
-                    hp.rotator.get_rotation_matrix((dp, -dz, 0.))[0],
-                    z, p) for z, p, dz, dp in zip(zen1, phi1, zen2, phi2)])
+        """
+        skv = np.roll(np.roll(np.diag(x.ravel()), 1, 1), -1, 0)
+        return skv - skv.T
 
-    # Rotate **all** these vectors towards ra3, dec3
-    zen, phi = hp.rotator.rotateDirection(
-                hp.rotator.get_rotation_matrix((-phi3, zen3, 0))[0],
-                x[:,0], x[:,1])
+    ra1 = np.atleast_1d(ra1)
+    dec1 = np.atleast_1d(dec1)
+    ra2 = np.atleast_1d(ra2)
+    dec2 = np.atleast_1d(dec2)
+    ra3 = np.atleast_1d(ra3)
+    dec3 = np.atleast_1d(dec3)
 
-    dec = np.pi/2. - zen
-    ra = phi + np.pi
+    assert(len(ra1) == len(dec1)
+                == len(ra2) == len(dec2)
+                == len(ra3) == len(dec3))
+    N = len(ra1)
 
-    return np.atleast_1d(ra), np.atleast_1d(dec)
+    alpha = np.arccos(np.cos(ra2 - ra1) * np.cos(dec1) * np.cos(dec2)
+                      + np.sin(dec1) * np.sin(dec2))
+    vec1 = np.vstack([np.cos(ra1) * np.cos(dec1),
+                      np.sin(ra1) * np.cos(dec1),
+                      np.sin(dec1)]).T
+    vec2 = np.vstack([np.cos(ra2) * np.cos(dec2),
+                      np.sin(ra2) * np.cos(dec2),
+                      np.sin(dec2)]).T
+    vec3 = np.vstack([np.cos(ra3) * np.cos(dec3),
+                      np.sin(ra3) * np.cos(dec3),
+                      np.sin(dec3)]).T
+    nvec = np.cross(vec1, vec2)
+    norm = np.sqrt(np.sum(nvec**2, axis=1))
+    nvec[norm > 0] /= norm[np.newaxis, norm > 0].T
 
+    one = np.diagflat(np.ones(3))
+    nTn = np.array([np.outer(nv, nv) for nv in nvec])
+    nx = np.array([cross_matrix(nv) for nv in nvec])
+
+    R = np.array([(1.-np.cos(a)) * nTn_i + np.cos(a) * one + np.sin(a) * nx_i
+                  for a, nTn_i, nx_i in zip(alpha, nTn, nx)])
+    vec = np.array([np.dot(R_i, vec_i.T) for R_i, vec_i in zip(R, vec3)])
+
+    ra = np.arctan2(vec[:, 1], vec[:, 0])
+    dec = np.arcsin(vec[:, 2])
+
+    ra += np.where(ra < 0., 2. * np.pi, 0.)
+
+    return ra, dec
 

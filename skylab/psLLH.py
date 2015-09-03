@@ -770,7 +770,7 @@ class PointSourceLLH(object):
                                 dict([(par, hot[par])
                                       for par in self.params]))
 
-                pV = pVal(fmin, np.sin(xmin["dec"]))
+                pV = np.asscalar(pVal(fmin, np.sin(xmin["dec"])))
 
                 print(hem)
                 print(("Hottest Grid at ra = {0:6.1f}deg, dec = {1:6.1f}deg\n"+
@@ -1394,7 +1394,7 @@ class PointSourceLLH(object):
                     n_sig = np.count_nonzero(mu > 0)
                     p_up = (float(np.count_nonzero(
                                         mu_TS[mu > 0] > TSval))
-                                / n_sig if n_sig > 0 else 0.)
+                                / n_inj if n_sig > 0 else 0.)
 
                     if n_sig > 1 and p_up > beta:
                         break

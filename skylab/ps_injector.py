@@ -84,19 +84,21 @@ def rotate_struct(ev, ra, dec):
     """
     names = ev.dtype.names
 
+    rot = np.empty_like(ev)
+
     # Function call
-    ev["ra"], rot_dec = rotate(ev["ra"], np.arcsin(ev["sinDec"]),
-                               ev["trueRa"], ev["trueDec"],
-                               ra, dec)
+    rot["ra"], rot_dec = rotate(ev["trueRa"], ev["trueDec"],
+                                ra * np.ones(len(ev)), dec * np.ones(len(ev)),
+                                ev["ra"], np.arcsin(ev["sinDec"]))
 
     if "dec" in names:
-        ev["dec"] = rot_dec
-    ev["sinDec"] = np.sin(rot_dec)
+        rot["dec"] = rot_dec
+    rot["sinDec"] = np.sin(rot_dec)
 
     # "delete" Monte Carlo information from sampled events
     mc = ["trueRa", "trueDec", "trueE", "ow"]
 
-    return drop_fields(ev, mc)
+    return drop_fields(rot, mc)
 
 
 class Injector(object):
