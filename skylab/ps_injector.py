@@ -84,7 +84,7 @@ def rotate_struct(ev, ra, dec):
     """
     names = ev.dtype.names
 
-    rot = np.empty_like(ev)
+    rot = np.copy(ev)
 
     # Function call
     rot["ra"], rot_dec = rotate(ev["trueRa"], ev["trueDec"],

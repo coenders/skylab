@@ -52,7 +52,6 @@ __status__ = "Development"
 
 from glob import glob
 import os
-import logging
 
 # Import PlotParser and all libraries in external python files
 __all__ = [os.path.basename(f)[:-3]
@@ -68,12 +67,12 @@ def set_pars(self, **kwargs):
     # Set all attributes passed, warn if private or not known
     for attr, value in kwargs.iteritems():
         if not hasattr(self, attr):
-            logger.error((">>>> {0:s} does not have attribute '{1:s}', "+
-                          "skipping...").format(self.__repr__(), attr))
+            print((">>>> {0:s} does not have attribute '{1:s}', "+
+                   "skipping...").format(self.__repr__(), attr))
             continue
         if attr.startswith("_"):
-            logger.error((">>>> _{0:s} should be considered private and "+
-                          "for internal use only!").format(attr))
+            print((">>>> _{0:s} should be considered private and "+
+                   "for internal use only!").format(attr))
         setattr(self, attr, value)
 
     return

@@ -70,7 +70,8 @@ _ev_S = np.nan
 _follow_up_factor = 2
 _gamma_bins = np.linspace(1., 4., 50 + 1)
 _gamma_def = 2.
-_hemisphere_dec = np.radians(-5.)
+_hemispheres = dict(North=(np.radians(-5.), np.inf),
+                    South=(-np.inf, np.radians(-5.)))
 _livetime = np.nan
 _log_level = logging.root.getEffectiveLevel()
 _max_iter = int(1.e5)
@@ -116,10 +117,8 @@ class PointSourceLLH(object):
     delta_ang : float
         Angular separation between source and event candidates used for
         calculation, value has to be within :math:`\left[0,\pi\right]`.
-    hemisphere_dec : float
-        Declination angle separating the two selection hemisphere's of up-
-        and down-going events.
-        Value has to be within :math:`\left[0,\pi\right]`.
+    hemispheres : dict
+        Dict that defines the declination ranges for regions
     livetime : float
         Livetime of the event sample in days.
     llh_model : `ps_model.NullModel`-like class
@@ -169,7 +168,7 @@ class PointSourceLLH(object):
 
     # settings for all-sky scan
     _follow_up_factor = _follow_up_factor
-    _hemisphere_dec = _hemisphere_dec
+    _hemispheres = _hemispheres
     _nside = _nside
     _random = np.random.RandomState()
     _seed = _seed
@@ -447,6 +446,8 @@ class PointSourceLLH(object):
             self._ev_B = np.append(self._ev_B,
                                    self.llh_model.background(inject))
 
+            self._N += len(inject)
+
         # calculate signal term
         self._ev_S = self.llh_model.signal(src_ra, src_dec, self._ev)
 
@@ -505,14 +506,15 @@ class PointSourceLLH(object):
         return
 
     @property
-    def hemisphere_dec(self):
-        return self._hemisphere_dec
+    def hemispheres(self):
+        return self._hemispheres
 
-    @hemisphere_dec.setter
-    def hemisphere_dec(self, val):
-        if np.any(np.fabs(np.asarray(val)) > np.pi/2):
-            logger.warn("Declination has to be within +/-90deg")
-        self._hemisphere_dec = float(np.fmod(val, np.pi/2.))
+    @hemispheres.setter
+    def hemispheres(self, val):
+        for items in val.iteritems():
+            if len(items) != 2:
+                raise ValueError("Hemispheres needs to be dict of ranges")
+        self._hemispheres = val
 
         return
 
@@ -752,10 +754,10 @@ class PointSourceLLH(object):
 
             """
             # get hottest spot with lowest p-value for background hypothesis
-            north = ((arr["dec"] > self.hemisphere_dec)
-                     & (arr["dec"] > decRange[0]) & (arr["dec"] < decRange[1]))
             result = dict()
-            for hem, mask in zip(["North", "South"], [north, ~north]):
+            for hem, val in self.hemispheres.iteritems():
+                mask = (arr["dec"] >= val[0]) & (arr["dec"] < val[1])
+                mask &= (arr["dec"] > decRange[0]) & (arr["dec"] < decRange[1])
                 if not np.any(mask):
                     print("{0:s}: No events here".format(hem))
                     continue
@@ -856,10 +858,13 @@ class PointSourceLLH(object):
             print("Analysing {0:7.2%} of the scan...".format(perc_points))
 
             mask = np.isfinite(TSs) & (dec > decRange[0]) & (dec < decRange[1])
-            dec_bound = np.unique(np.concatenate([decRange,
-                                                  [self.hemisphere_dec]]))
+
+            dec_bound = np.unique(np.concatenate(
+                                    [decRange] + self.hemispheres.values()))
             dec_bound = dec_bound[(dec_bound >= decRange[0])
                                   &(dec_bound <= decRange[1])]
+            print(dec_bound)
+
             for ldec, udec in zip(dec_bound[:-1], dec_bound[1:]):
                 print("\tDec. {0:-5.1f} to {1:-5.1f} deg".format(
                         *np.degrees([ldec, udec])),
