@@ -62,7 +62,6 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
 
 _deg = 4
-_ext = 3
 
 def rotate_struct(ev, ra, dec):
     r"""Wrapper around the rotate-method in skylab.utils for structured
@@ -529,7 +528,6 @@ class ModelInjector(PointSourceInjector):
         """
 
         deg = kwargs.pop("deg", _deg)
-        ext = kwargs.pop("ext", _ext)
 
         s = np.argsort(logE)
         logE = logE[s]

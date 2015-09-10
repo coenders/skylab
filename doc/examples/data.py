@@ -13,8 +13,8 @@ from __future__ import print_function
 import numpy as np
 
 # skylab
-from skylab.psLLH import PointSourceLLH
-from skylab.ps_model import ClassicLLH
+from skylab.psLLH import PointSourceLLH, MultiPointSourceLLH
+from skylab.ps_model import ClassicLLH, EnergyLLH
 
 log_mean = np.log(np.radians(3.))
 log_sig = np.log(1.5)
@@ -57,16 +57,43 @@ def MC(N=1000):
 
     return arr
 
-def init(Nexp, NMC):
+def init(Nexp, NMC, energy=False, **kwargs):
     arr_exp = exp(Nexp)
     arr_mc = MC(NMC)
 
-    llh_model = ClassicLLH(sinDec_bins=max(2, Nexp // 10),
-                           sinDec_range=[-1., 1.])
+    if energy:
+        llh_model = EnergyLLH(sinDec_bins=max(2, Nexp // 25),
+                              sinDec_range=[-1., 1.],
+                              twodim_bins=max(3, Nexp // 100),
+                              twodim_range=[[0.9 * min(arr_exp["logE"].min(),
+                                                       arr_mc["logE"].min()),
+                                             1.1 * max(arr_exp["logE"].max(),
+                                                       arr_mc["logE"].max())],
+                                            [-1., 1.]])
+    else:
+        llh_model = ClassicLLH(sinDec_bins=max(2, Nexp // 25),
+                               sinDec_range=[-1., 1.])
 
     llh = PointSourceLLH(arr_exp, arr_mc, 365., llh_model=llh_model,
-                         mode="all", hemisphere_dec=0.,
-                         rho_nsource_bounds=(-0.8, 0.8))
+                         seed=kwargs.pop("seed", 1234),
+                         mode="all", hemispheres=dict(FullSky=(-np.inf, np.inf)),
+                         nsource_bounds=((-0.5 if not energy else 0.) * Nexp,
+                                         0.5 * Nexp),
+                         **kwargs)
+
+    return llh
+
+def multi_init(n, Nexp, NMC, **kwargs):
+    energy = kwargs.pop("energy", False)
+    seed = kwargs.pop("seed", 0)
+    llh = MultiPointSourceLLH(seed=seed, **kwargs)
+
+    seed += 1
+
+    for i in range(n):
+        llh.add_sample("S{0:02d}".format(i), init(np.random.poisson(Nexp // n),
+                                                  NMC, energy=energy,
+                                                  seed=seed + i))
 
     return llh
 

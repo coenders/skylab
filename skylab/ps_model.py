@@ -22,16 +22,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # python packages
 from copy import deepcopy
 import logging
+import os
 
 # scipy-project imports
-import healpy as hp
 import numpy as np
 import scipy.interpolate
 from scipy.stats import norm
-from scipy.signal import convolve
 
 # local package imports
 from . import set_pars
+from .utils import kernel_func
 
 # get module logger
 def trace(self, message, *args, **kwargs):
@@ -60,7 +60,7 @@ _2dim_bins = 25
 _ratio_perc = 99.
 _1dim_order = 2
 _2dim_order = 2
-_gamma_precision = 0.1
+_precision = 0.1
 _par_val = np.nan
 _parab_cache = np.zeros((0, ), dtype=[("S1", np.float), ("a", np.float),
                                       ("b", np.float)])
@@ -73,6 +73,10 @@ class NullModel(object):
     starting point for a unbinned point source likelihood model
 
     """
+
+    # tell pickle where this class belongs to
+    __module__ = os.path.splitext(os.path.basename(__file__))[0]
+
     def __init__(self, *args, **kwargs):
         raise NotImplementedError(
                 "NullModel only to be used as abstract superclass".format(
@@ -299,10 +303,7 @@ class WeightLLH(ClassicLLH):
 
     _mc = None
 
-    _precision = _gamma_precision
-
-    _g1 = _par_val
-    _w_cache = _parab_cache
+    _precision = _precision
 
     def __init__(self, params, pars, bins, *args, **kwargs):
         r"""Constructor
@@ -344,25 +345,21 @@ class WeightLLH(ClassicLLH):
         kernel = kwargs.pop("kernel", 0)
         if np.all(np.asarray(kernel) == 0):
             # No smoothing
-            self._kernel_func = lambda X: X
+            self._XX = None
         elif isinstance(kernel, (list, np.ndarray)):
             kernel_arr = np.asarray(kernel)
             assert(np.all(kernel_arr >= 0))
             XX = np.meshgrid(*([kernel_arr for i in range(len(self.hist_pars)
                                                           - self._ndim_norm)]
                               + [[1] for i in range(self._ndim_norm)]))
-            XX = np.product(XX, axis=0).T
-            self._kernel_func = (lambda X: convolve(X, XX, mode="same")
-                                            / convolve(np.ones_like(X), XX, mode="same"))
+            self._XX = np.product(XX, axis=0).T
         elif isinstance(kernel, int):
             assert(kernel > 0)
             kernel_arr = np.ones(2 * kernel + 1, dtype=np.float)
             XX = np.meshgrid(*([kernel_arr for i in range(len(self.hist_pars)
                                                           - self._ndim_norm)]
                               + [[1] for i in range(self._ndim_norm)]))
-            XX = np.product(XX, axis=0).T
-            self._kernel_func = (lambda X: convolve(X, XX, mode="same")
-                                            / convolve(np.ones_like(X), XX, mode="same"))
+            self._XX = np.product(XX, axis=0).T
         elif isinstance(kernel, float):
             assert(kernel >= 1)
             val = 1.6635
@@ -371,15 +368,11 @@ class WeightLLH(ClassicLLH):
             XX = np.meshgrid(*([kernel_arr for i in range(len(self.hist_pars)
                                                           - self._ndim_norm)]
                               + [[1] for i in range(self._ndim_norm)]))
-            XX = np.product(XX, axis=0).T
-            self._kernel_func = (lambda X: convolve(X, XX, mode="same")
-                                            / convolve(np.ones_like(X), XX, mode="same"))
+            self._XX = np.product(XX, axis=0).T
         else:
             raise ValueError("Kernel has to be positive int / float or array")
 
         super(WeightLLH, self).__init__(*args, params=params, **kwargs)
-
-        self._w_spline_dict = dict()
 
         return
 
@@ -504,7 +497,7 @@ class WeightLLH(ClassicLLH):
 
         # create MC histogram
         wSh, wSb = self._hist(mcvars, weights=self._get_weights(**params))
-        wSh = self._kernel_func(wSh)
+        wSh = kernel_func(wSh, self._XX)
         wSd = wSh > 0.
 
         # calculate ratio
@@ -542,13 +535,25 @@ class WeightLLH(ClassicLLH):
         expvars = [exp[p] for p in self.hist_pars]
 
         self._wB_hist, self._wB_bins = self._hist(expvars)
-        self._wB_hist = self._kernel_func(self._wB_hist)
+        self._wB_hist = kernel_func(self._wB_hist, self._XX)
         self._wB_domain = self._wB_hist > 0
 
         # overwrite bins
         self._ndim_bins = self._wB_bins
         self._ndim_range = tuple([(wB_i[0], wB_i[-1])
                                   for wB_i in self._wB_bins])
+
+        par_vals = [np.arange(par[1][0], par[1][1] + self._precision,
+                              self._precision)
+                    for par in self.params.itervalues()]
+
+        pV = np.meshgrid(*par_vals)
+
+        for tup in zip(*pV):
+            params = dict([(key, self._around(tup_i))
+                           for key, tup_i in zip(self.params.iterkeys(), tup)])
+
+            self._ratio_spline(**params)
 
         return
 
@@ -566,65 +571,12 @@ class WeightLLH(ClassicLLH):
 
         return
 
-    def weight(self, ev, **params):
-        r"""Evaluate spline for given parameters.
-
-        Parameters
-        -----------
-        ev : structured array
-            Events to be evaluated
-
-        params : dict
-            Parameters for evaluation
-
-        Returns
-        --------
-        val : array-like (N), N events
-            Function value.
-
-        grad : array-like (N, M), N events in M parameter dimensions
-            Gradients at function value.
+    def weight(self, *args, **kwargs):
+        r"""Not implemented here, need to know the parameters.
 
         """
-        # get params
-        gamma = params["gamma"]
 
-        # evaluate on finite gridpoints in spectral index gamma
-        g1 = self._around(gamma)
-        dg = self._precision
-
-        # check whether the grid point of evaluation has changed
-        if g1 == self._g1 and len(ev) == len(self._w_cache):
-            S1 = self._w_cache["S1"]
-            a = self._w_cache["a"]
-            b = self._w_cache["b"]
-        else:
-            # evaluate neighbouring gridpoints and parametrize a parabola
-            g0 = g1 - dg
-            g2 = g1 + dg
-
-            S0 = self._spline_eval(self._ratio_spline(gamma=g0), ev)
-            S1 = self._spline_eval(self._ratio_spline(gamma=g1), ev)
-            S2 = self._spline_eval(self._ratio_spline(gamma=g2), ev)
-
-            a = (S0 - 2.*S1 + S2) / (2. * dg**2)
-            b = (S2 - S0) / (2. * dg)
-
-            # cache values
-            self._g1 = g1
-
-            self._w_cache = np.zeros((len(ev),),
-                                     dtype=[("S1", np.float), ("a", np.float),
-                                            ("b", np.float)])
-            self._w_cache["S1"] = S1
-            self._w_cache["a"] = a
-            self._w_cache["b"] = b
-
-        # calculate value at the parabola
-        val = np.exp(a * (gamma - g1)**2 + b * (gamma - g1) + S1)
-        grad = val * (2. * a * (gamma - g1) + b)
-
-        return val, np.atleast_2d(grad)
+        self.__raise__()
 
 
 class PowerLawLLH(WeightLLH):
@@ -663,6 +615,50 @@ class PowerLawLLH(WeightLLH):
         """
 
         return self._mc["ow"] * self._mc["trueE"]**(-params["gamma"])
+
+    def weight(self, ev, **params):
+        r"""Evaluate spline for given gamma.
+
+        Parameters
+        -----------
+        ev : structured array
+            Events to be evaluated
+
+        params : dict
+            Parameters for evaluation
+
+        Returns
+        --------
+        val : array-like (N), N events
+            Function value.
+
+        grad : array-like (N, M), N events in M parameter dimensions
+            Gradients at function value.
+
+        """
+        # get params
+        gamma = params["gamma"]
+
+        # evaluate on finite gridpoints in spectral index gamma
+        g1 = self._around(gamma)
+        dg = self._precision
+
+        # evaluate neighbouring gridpoints and parametrize a parabola
+        g0 = g1 - dg
+        g2 = g1 + dg
+
+        S0 = self._spline_eval(self._ratio_spline(gamma=g0), ev)
+        S1 = self._spline_eval(self._ratio_spline(gamma=g1), ev)
+        S2 = self._spline_eval(self._ratio_spline(gamma=g2), ev)
+
+        a = (S0 - 2.*S1 + S2) / (2. * dg**2)
+        b = (S2 - S0) / (2. * dg)
+
+        # calculate value at the parabola
+        val = np.exp(a * (gamma - g1)**2 + b * (gamma - g1) + S1)
+        grad = val * (2. * a * (gamma - g1) + b)
+
+        return val, np.atleast_2d(grad)
 
 
 

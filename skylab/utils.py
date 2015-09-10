@@ -24,9 +24,31 @@ Helper methods for the other classes
 
 """
 
-import healpy as hp
 import numpy as np
 from scipy.stats import chi2, kstest, poisson
+from scipy.signal import convolve
+
+def kernel_func(X, Y):
+    r"""Smooth a histogram using a kernel using convolution of the two
+    histograms.
+
+    Parameters
+    -----------
+    X : ndarray (N, M, ...)
+        histogram for smoothing
+    Y : ndarray (N, M, ...)
+        kernel used for smoothing
+
+    Returns
+    --------
+    Z : ndarray (N, M, ...)
+        smoothed histogram
+
+    """
+    if Y is None:
+        return X
+
+    return convolve(X, Y, mode="same") / convolve(np.ones_like(X), Y, mode="same")
 
 
 def poisson_percentile(mu, x, y, yval):
@@ -114,13 +136,13 @@ def poisson_weight(vals, mean):
 
 
 class delta_chi2(object):
-    """ A probability density function similar to scipy's rvs functions.
+    r"""A probability density function similar to scipy's rvs functions.
     It consisist of a chi2 distribution plus a delta-distribution at zero.
 
     """
 
     def __init__(self, data, **kwargs):
-        """ Constructor, evaluates the percentage of events equal to zero and
+        r"""Constructor, evaluates the percentage of events equal to zero and
         fits a chi2 to the rest of the data.
 
         Parameters
@@ -153,6 +175,25 @@ class delta_chi2(object):
 
         return
 
+    def __call__(self, val):
+        r"""Calling the class gives the isf
+
+        """
+
+        return self.isf(val)
+
+    def __getstate__(self):
+        return dict(par=self.par, eta=self.eta, eta_err=self.eta_err,
+                    ks=self.ks)
+
+    def __setstate(self, state):
+        for key, val in state.iteritems():
+            setattr(self, key, val)
+
+        self.f = chi2(*self.par)
+
+        return
+
     def __str__(self):
         return ("Delta Distribution plus chi-square {0:s}\n".format(
                     self.__repr__())
@@ -165,40 +206,124 @@ class delta_chi2(object):
                )
 
     def pdf(self, x):
-        """ Probability density function.
+        r"""Probability density function.
+
         """
         return np.where(x > 0, self.eta * self.f.pdf(x), 1. - self.eta)
 
     def logpdf(self, x):
-        """ Logarithmic pdf.
+        r"""Logarithmic pdf.
+
         """
         return np.where(x > 0, np.log(self.eta) + self.f.logpdf(x),
                                np.log(1. - self.eta))
 
     def cdf(self, x):
-        """ Probability mass function.
+        r"""Probability mass function.
+
         """
         return (1. - self.eta) + self.eta * self.f1.cdf(x)
 
     def logcdf(self, x):
-        """ Logarithmic cdf.
+        r"""Logarithmic cdf.
+
         """
         return np.log(1. - self.eta) + np.log(self.eta) + self.f1.logcdf(x)
 
     def sf(self, x):
-        """ Survival probability function.
+        r"""Survival probability function.
         """
         return np.where(x > 0, self.eta * self.f.sf(x), 1.)
 
     def logsf(self, x):
-        """ Logarithmic sf.
+        r"""Logarithmic sf.
+
         """
         return np.where(x > 0, np.log(self.eta) + self.f.logsf(x), 0.)
 
     def isf(self, x):
-        """ Inverse survival function.
+        r"""Inverse survival function.
+
         """
         return np.where(x < self.eta, self.f.isf(x/self.eta), 0.)
+
+
+class delta_exp(object):
+    r"""An approximated exponential probability densitiy function fitting
+    the tail.
+
+    """
+    def __init__(self, data, **kwargs):
+        r"""Constructor. The data will be fitted with an exponential tail for
+        data bigger than zero.
+
+        """
+
+        data = np.asarray(data)
+
+        self.deg = kwargs.pop("deg", 1)
+
+        # number of overfluctuations
+        self.eta = float(np.count_nonzero(data > 0)) / len(data)
+        self.eta_err = np.sqrt(self.eta * (1. - self.eta) / len(data))
+
+        # sort positive data and cumulative distribution
+        x = np.sort(data[data > 0])
+        y = self.eta * np.linspace(1., 0., len(x) + 1)[:-1]
+
+        self.p = np.polyfit(x, np.log(y), self.deg)
+
+        return
+
+    def __call__(self, val):
+        r"""Calling the class gives the isf
+
+        """
+
+        return self.isf(val)
+
+    def __getstate__(self):
+        return dict(eta=self.eta, eta_err=self.eta_err, p=self.p)
+
+    def __setstate(self, state):
+        self.eta = state.pop("eta")
+        self.eta_err = state.pop("eta_err")
+        self.p = state.pop("p")
+
+        return
+
+    def __str__(self):
+        return ("Exponential with delta peak: {0:s}\n".format(self.__repr__()) +
+                "\tSeparation factor = {0:8.3%} +/- {1:8.3%}\n".format(
+                    self.eta, self.eta_err) +
+                "\tDegrees of polynomial: {0:d}\n".format(self.deg) +
+                "\tPolynomial           : " + "\t".join(["{0:-.2e}".format(pi)
+                                                         for pi in self.p]))
+
+    def sf(self, val):
+        r"""Survival function.
+
+        """
+
+        return np.where(val > 0., np.exp(np.polyval(self.p, val)), self.eta)
+
+    def isf(self, val):
+        r"""Inverse survival function.
+
+        """
+        if val > self.eta:
+            # value in delta-peak
+            return 0.
+
+        p = self.p
+        p[-1] -= np.log(val)
+
+        r = np.roots(p)
+
+        r = r[np.isreal(r)]
+        r = r[r > 0]
+
+        return np.amax(r)
 
 
 class twoside_chi2(object):
@@ -237,6 +362,27 @@ class twoside_chi2(object):
         # get fit-quality
         self.ks1 = kstest(data[data > 0.], "chi2", args=self.par1)[1]
         self.ks2 = kstest(-data[data < 0.], "chi2", args=self.par2)[1]
+
+        return
+
+    def __call__(self, val):
+        r"""Calling the class gives the isf
+
+        """
+
+        return self.isf(val)
+
+    def __getstate__(self):
+        return dict(par=self.par1, par2=self.par2,
+                    eta=self.eta, eta_err=self.eta_err,
+                    ks1=self.ks1, ks2=self.ks2)
+
+    def __setstate(self, state):
+        for key, val in state.iteritems():
+            setattr(self, key, val)
+
+        self.f1 = chi2(*self.par1)
+        self.f2 = chi2(*self.par2)
 
         return
 
@@ -327,7 +473,6 @@ def rotate(ra1, dec1, ra2, dec2, ra3, dec3):
     assert(len(ra1) == len(dec1)
                 == len(ra2) == len(dec2)
                 == len(ra3) == len(dec3))
-    N = len(ra1)
 
     alpha = np.arccos(np.cos(ra2 - ra1) * np.cos(dec1) * np.cos(dec2)
                       + np.sin(dec1) * np.sin(dec2))

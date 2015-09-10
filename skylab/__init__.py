@@ -55,9 +55,10 @@ import os
 
 # Import PlotParser and all libraries in external python files
 __all__ = [os.path.basename(f)[:-3]
-            for f in glob(os.path.join(os.path.dirname(__file__), "*.py"))
-            if not f.endswith("__init__.py")]
+           for f in glob(os.path.join(os.path.dirname(__file__), "*.py"))
+           if not f.endswith("__init__.py")]
 del f
+
 
 def set_pars(self, **kwargs):
     r"""Constructor with basic settings needed in all LLH classes.
@@ -67,14 +68,12 @@ def set_pars(self, **kwargs):
     # Set all attributes passed, warn if private or not known
     for attr, value in kwargs.iteritems():
         if not hasattr(self, attr):
-            print((">>>> {0:s} does not have attribute '{1:s}', "+
+            print((">>>> {0:s} does not have attribute '{1:s}', " +
                    "skipping...").format(self.__repr__(), attr))
             continue
         if attr.startswith("_"):
-            print((">>>> _{0:s} should be considered private and "+
+            print((">>>> _{0:s} should be considered private and " +
                    "for internal use only!").format(attr))
         setattr(self, attr, value)
 
     return
-
-

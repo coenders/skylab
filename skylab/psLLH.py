@@ -27,6 +27,7 @@ Core class of the Point Source Likelihood calculation
 # python packages
 from itertools import repeat
 import logging
+import multiprocessing
 import sys
 import time
 
@@ -36,6 +37,7 @@ import numpy as np
 import numpy.lib.recfunctions
 import scipy.interpolate
 import scipy.optimize
+import scipy.stats
 from scipy.signal import convolve2d
 
 # local package imports
@@ -59,14 +61,11 @@ logger.addHandler(logging.StreamHandler())
 
 # variable defaults
 _aval = 1.e-3
-_B = np.nan
 _b_eps = 0.9
 _beta_val = 0.5
 _delta_ang = np.radians(10.)
 _eps = 5.e-3
 _ev = None
-_ev_B = np.nan
-_ev_S = np.nan
 _follow_up_factor = 2
 _gamma_bins = np.linspace(1., 4., 50 + 1)
 _gamma_def = 2.
@@ -74,27 +73,23 @@ _hemispheres = dict(North=(np.radians(-5.), np.inf),
                     South=(-np.inf, np.radians(-5.)))
 _livetime = np.nan
 _log_level = logging.root.getEffectiveLevel()
-_max_iter = int(1.e5)
-_max_trial = int(1.e3)
-_min_iter = int(2.5e3)
 _min_ns = 1.
 _mode = "box"
-_n = 0
 _n_iter = 1000
+_n_trials = int(1.e5)
 _n_sig = 5.
 _nside = 128
 _out_print = 0.1
 _pgtol = 1.e-3
 _pVal = lambda TS, sinDec: TS
 _rho_max = 0.95
-_rho_nsource = 0.01
-_rho_nsource_bounds = (0., 0.9)
+_nsource = 50
+_nsource_bounds = (0., 1000)
 _src_dec = np.nan
 _src_ra = np.nan
 _seed = None
 _sindec_bins = np.linspace(-1., 1., 100. + 1)
 _thresh_S = 0.
-_TSval = None
 _ub_perc = 1.
 _win_points = 50
 
@@ -127,6 +122,8 @@ class PointSourceLLH(object):
         Logging level for output information.
     mode : str
         Event selection mode for minimisation ("all", "band", "box").
+    ncpu : int
+        Number of cpus to use for some calculations.
     nside : int
         N_Side value for pixelisation of SkyMap in `HealPix`. Value has to be
         valid power of 2.
@@ -145,9 +142,9 @@ class PointSourceLLH(object):
         Calculate Likelihood.
     fit_source(src_ra, src_dec, **kwargs)
         Minimize the likelihood at the position `src_ra`, `src_dec`.
-    reset()
-        Delete all cached values.
-    sensitivity(src_dec, alpha, beta, inj, **kwargs)
+    fit_source(src_ra, src_dec, size, seed, **kwargs)
+        Fit for source location starting from a given point.
+    weighted_sensitivity(src_dec, alpha, beta, inj, **kwargs)
         Calculate the sensitivity for `beta` percent of scrambles being above
         threshold.
 
@@ -158,13 +155,14 @@ class PointSourceLLH(object):
 
     _log_level = _log_level
     _out_print = _out_print
+    _ncpu = 1
 
     # LLH model
     _llh_model = ps_model.ClassicLLH()
 
     # settings for fitting
-    _rho_nsource = _rho_nsource
-    _rho_nsource_bounds = _rho_nsource_bounds
+    _nsource = _nsource
+    _nsource_bounds = _nsource_bounds
 
     # settings for all-sky scan
     _follow_up_factor = _follow_up_factor
@@ -181,19 +179,6 @@ class PointSourceLLH(object):
     _mode = _mode
     _thresh_S = _thresh_S
 
-    # cached values used to determine if recalculation of llh-weights is needed
-
-    # source hypothesis related
-    _B = _B
-    _n = _n
-
-    # events in current selection for llh evaluation
-    _ev = _ev
-    _ev_B = _ev_B
-    _ev_S = _ev_S
-    _src_ra = _src_ra
-    _src_dec = _src_dec
-
     def __init__(self, exp, mc, livetime,
                  scramble=True, upscale=False, **kwargs):
         r"""Constructor of `PointSourceLikelihood`.
@@ -205,14 +190,11 @@ class PointSourceLLH(object):
         exp : NumPy structured array
             Experimental data with all information needed in the likelihood
             model. Essential values are `ra`, `sinDec`, `sigma`.
-
         mc : NumPy structured array
             Monte Carlo data similar to `exp`, with additional Monte Carlo
             information `trueRa`, `trueDec`, `trueE`, `ow`.
-
         livetime : float
             Livetime of experimental data.
-
         upscale : bool or float
             If float, scale data to match livetime *upscale*
 
@@ -220,7 +202,6 @@ class PointSourceLLH(object):
         ----------------
         scramble : bool
             Scramble data rightaway.
-
         kwargs
             Configuration parameters to assign values to class attributes.
 
@@ -294,14 +275,17 @@ class PointSourceLLH(object):
 
         # scramble data if not unblinded. Do this after seed has been set
         if scramble:
-            self.exp["ra"] = self.random.uniform(0., 2. * np.pi, len(self.exp))
+            self.exp["ra"] = self.random.uniform(0., 2. * np.pi, self.N)
         else:
             print("\t####################################\n"+
                   "\t# Working on >> UNBLINDED << data! #\n"+
                   "\t####################################\n")
 
         # background will not change, calculate right-away
-        self._B = self.llh_model.background(self.exp)
+        self.exp = numpy.lib.recfunctions.append_fields(
+                                 self.exp, "B",
+                                 self.llh_model.background(self.exp),
+                                 usemask=False)
 
         return
 
@@ -317,7 +301,7 @@ class PointSourceLLH(object):
                 "\tlog10 Energy Range : {4:6.1f} - {5:6.1f}\n"+
                 "\tLivetime of sample : {6:7.2f} days\n").format(
                          self.__repr__(),
-                         len(self.exp),
+                         self.N,
                          np.degrees(np.arcsin(np.amin(self.exp["sinDec"]))),
                          np.degrees(np.arcsin(np.amax(self.exp["sinDec"]))),
                          np.amin(self.exp["logE"]), np.amax(self.exp["logE"]),
@@ -332,10 +316,6 @@ class PointSourceLLH(object):
                          np.degrees(np.arcsin(np.amax(self.mc["sinDec"]))),
                          np.amin(self.mc["logE"]), np.amax(self.mc["logE"]))
 
-        # Selection
-        sout += (67*"-"+"\n"+
-                 "Selected Events      : {0:7d}\n".format(self._n))
-
         # LLH information
         sout += 67*"-"+"\n"
         sout += "Likelihood model:\n"
@@ -348,7 +328,7 @@ class PointSourceLLH(object):
         seed = self.par_seeds
         bounds = self.par_bounds
         for p, s, b in zip(pars, seed, bounds):
-            sout += "{0:15s}\t{1:.2f}\t{2:.2f} to {3:.2f}\n".format(
+            sout += "\t{0:15s}\t{1:.2f}\t{2:.2f} to {3:.2f}\n".format(
                     p, s, *b)
         sout += 67*"-"
 
@@ -368,18 +348,15 @@ class PointSourceLLH(object):
         ----------------
         scramble : bool
             Scramble rightascension prior to selection.
-
         inject : numpy_structured_array
-            Events to add to the selected events, fields equal to experimental
-            data.
+            Events to add to the selected events, fields equal to exp. data.
 
         """
 
         scramble = kwargs.pop("scramble", False)
         inject = kwargs.pop("inject", None)
-
-        # reset
-        self.reset()
+        if kwargs:
+            raise ValueError("Don't know arguments", kwargs.keys())
 
         # get the zenith band with correct boundaries
         dec = (np.pi - 2. * self.delta_ang) / np.pi * src_dec
@@ -387,9 +364,6 @@ class PointSourceLLH(object):
         max_dec = min(np.pi / 2., dec + self.delta_ang)
 
         dPhi = 2. * np.pi
-
-        # number of total events
-        self._N = len(self.exp)
 
         if self.mode == "all" :
             # all events are selected
@@ -404,13 +378,11 @@ class PointSourceLLH(object):
             raise ValueError("Not supported mode: {0:s}".format(self.mode))
 
         # update the zenith selection and background probability
-        self._ev = self.exp[exp_mask]
-        self._ev_B = self._B[exp_mask]
+        ev = self.exp[exp_mask]
 
         # update rightascension information for scrambled events
         if scramble:
-            self._ev["ra"] = self.random.uniform(0., 2. * np.pi,
-                                                 size=len(self._ev))
+            ev["ra"] = self.random.uniform(0., 2. * np.pi, size=len(ev))
 
         # selection in rightascension
         if self.mode == "box":
@@ -419,59 +391,51 @@ class PointSourceLLH(object):
             # the rightascension value has to change with declination
             cosFact = np.amin(np.cos([min_dec, max_dec]))
             dPhi = np.amin([2. * np.pi, 2. * self.delta_ang / cosFact])
-            ra_dist = np.fabs((self._ev["ra"] - src_ra + np.pi) % (2. * np.pi)
+            ra_dist = np.fabs((ev["ra"] - src_ra + np.pi) % (2. * np.pi)
                               - np.pi)
             mask = ra_dist < dPhi/2.
 
-            self._ev = self._ev[mask]
-
-            self._ev_B = self._ev_B[mask]
-
-        self._src_ra = src_ra
-        self._src_dec = src_dec
+            ev = ev[mask]
 
         if inject is not None:
-            '''
             # how many events are randomly inside of the selection
-            m = self.random.poisson(float(len(inject)) * dPhi / (2.*np.pi))
-            ind = np.random.choice(len(self._ev), size=m)
-            ind = np.array([i for i in range(len(self._ev)) if not i in ind])
+            m = (self.random.poisson(float(len(inject)) * dPhi / (2.*np.pi))
+                    if self.mode == "box" else len(inject))
+            ind = np.random.choice(len(ev), size=min(m, len(ev)),
+                                   replace=False)
 
-            self._ev = self._ev[ind]
-            '''
+            ev = ev[np.arange(len(ev))[np.in1d(np.arange(len(ev)), ind,
+                                               invert=True)]]
 
-            self._ev = np.append(self._ev, inject)
-
-            # add background probabilities to injected events
-            self._ev_B = np.append(self._ev_B,
-                                   self.llh_model.background(inject))
-
-            self._N += len(inject)
+            ev = np.append(ev, numpy.lib.recfunctions.append_fields(
+                                        inject, "B",
+                                        self.llh_model.background(inject),
+                                        usemask=False))
 
         # calculate signal term
-        self._ev_S = self.llh_model.signal(src_ra, src_dec, self._ev)
+        ev = numpy.lib.recfunctions.append_fields(
+                            ev, "S",
+                            self.llh_model.signal(src_ra, src_dec, ev),
+                            usemask=False)
 
         # do not calculate values with signal below threshold
-        ev_mask = self._ev_S > self.thresh_S
-        self._ev = self._ev[ev_mask]
-        self._ev_S = self._ev_S[ev_mask]
-        self._ev_B = self._ev_B[ev_mask]
+        ev_mask = ev["S"] > self.thresh_S
+        ev = ev[ev_mask]
 
         # set number of selected events
-        self._n = len(self._ev)
+        n = len(ev)
 
-        if (self._n < 1
-            and (np.sin(self._src_dec) < self.sinDec_range[0]
-                 and np.sin(self._src_dec) > self.sinDec_range[-1])):
+        if (n < 1
+            and (np.sin(src_dec) < self.sinDec_range[0]
+                 and np.sin(src_dec) > self.sinDec_range[-1])):
             logger.error("No event was selected, fit will go to -infinity")
 
         logger.info("Select new events for mode {0:s}\n".format(self.mode) +
                     ("For point at ra = {0:6.2f} deg, dec = {1:-6.2f} deg, " +
                      "{2:6d} events were selected").format(
-                          np.degrees(src_ra), np.degrees(src_dec),
-                          self._n))
+                          np.degrees(src_ra), np.degrees(src_dec), n))
 
-        return
+        return ev
 
     # PROPERTIES for public variables using getters and setters
 
@@ -559,18 +523,25 @@ class PointSourceLLH(object):
         return
 
     @property
+    def N(self):
+        if not hasattr(self, "_N"):
+            self._N = len(self.exp)
+
+        return self._N
+
+    @property
     def params(self):
         return ["nsources"] + self.llh_model.params.keys()
 
     @property
     def par_bounds(self):
-        return np.array([self._n * np.array(self._rho_nsource_bounds)] +
+        return np.array([np.array(self.nsource_bounds)] +
                         [self.llh_model.params[par][1]
                             for par in self.params[1:]])
 
     @property
     def par_seeds(self):
-        return np.array([self._n * self._rho_nsource] +
+        return np.array([self.nsource] +
                         [self.llh_model.params[par][0]
                             for par in self.params[1:]])
 
@@ -580,13 +551,19 @@ class PointSourceLLH(object):
 
     @mode.setter
     def mode(self, val):
-        if val == self._mode:
-            return
-        logger.info("Changing mode from {0:s} to {1:s}".format(self._mode,
-                                                               val))
         self._mode = val
-        logger.debug("Need to rGeset all cached values...")
-        self.reset()
+
+        return
+
+    @property
+    def ncpu(self):
+        return self._ncpu
+
+    @ncpu.setter
+    def ncpu(self, val):
+        if int(val) > multiprocessing.cpu_count():
+            logger.warn("Assigning more workers than available number of cpu")
+        self._ncpu = int(val)
 
         return
 
@@ -615,15 +592,25 @@ class PointSourceLLH(object):
         return
 
     @property
-    def rho_nsource_bounds(self):
-        return self._rho_nsource_bounds
+    def nsource(self):
+        return self._nsource
 
-    @rho_nsource_bounds.setter
-    def rho_nsource_bounds(self, val):
+    @nsource.setter
+    def nsource(self, val):
+        self._nsource = float(val)
+
+        return
+
+    @property
+    def nsource_bounds(self):
+        return self._nsource_bounds
+
+    @nsource_bounds.setter
+    def nsource_bounds(self, val):
         if not len(val) == 2:
             raise ValueError("Bounds have to be of length 2!")
 
-        self._rho_nsource_bounds = val
+        self._nsource_bounds = val
 
         return
 
@@ -683,7 +670,7 @@ class PointSourceLLH(object):
 
         follow_up_factor : int
             Power of 2 for grid size in secondary scans.
-            N_Side[n+1] = NSide[N] * 2**fuf.
+            N_Side[n+1] = NSide[n] * 2**fuf.
 
         pVal : lambda function
             Function to convert from test statistic and sin(decl.) to a p-value
@@ -703,49 +690,25 @@ class PointSourceLLH(object):
             Other keyword arguments are passed to the source fitting
             """
 
-            nside = hp.pixelfunc.npix2nside(len(ra))
+            args = [(self, ra_i, dec_i, None, False,
+                     dict([(par, xmin_i[par]) for par in self.params
+                           if xmin_i["nsources"] > _min_ns]))
+                    for ra_i, dec_i, xmin_i in zip(ra[mask], dec[mask],
+                                                   xmins[mask])]
 
-            out_print = self._out_print
-            start = time.clock()
-            n_iters = np.count_nonzero(mask)
-            n = 0
-            for i, (ra_i, dec_i, m) in enumerate(zip(ra, dec, mask)):
-                if not m:
-                    continue
-                logger.trace(("Point {0:7d}, ra = {1:6.1f} deg, "+
-                              "dec = {1:6.1f} deg").format(i, np.degrees(ra_i),
-                                                           np.degrees(dec_i)))
-                # seed the data with the hottest spot around the scanned point
-                # if no interesting point around, seed with default value
-                neighbours = hp.pixelfunc.get_all_neighbours(nside, i)
-                hottest_nb = neighbours[np.argmax(TSs[neighbours])]
-                x_seed = xmins[hottest_nb]
-                x_dict = [(par, x_seed[par])
-                          for par in self.params
-                          if x_seed["nsources"] > _min_ns
-                          and seed_bounds[par][0]
-                                < x_seed[par] < seed_bounds[par][1]]
+            if self.ncpu > 1 and len(args) > self.ncpu:
+                pool = multiprocessing.Pool(self.ncpu)
+                result = pool.map(fs, args, len(args) // self.ncpu + 1)
 
-                TS_i, xmin_i = self.fit_source(ra_i, dec_i,
-                                               **dict(x_dict, **kwargs))
+                pool.close()
+                pool.join()
+                del pool
+            else:
+                result = map(fs, args)
 
-                TSs[i] = TS_i
-
-                for key, val in xmin_i.iteritems():
-                    xmins[key][i] = val
-
-                # report output
-                if float(n)/n_iters > out_print:
-                    stop = time.clock()
-                    mins, secs = divmod(stop - start, 60)
-                    print(("\t{0:7.2%} after {1:2.0f}' {2:4.1f}'' "+
-                           "({3:8d} of {4:8d})").format(
-                            float(n)/n_iters, mins, secs, n, n_iters))
-                    out_print += 0.1
-
-                    sys.stdout.flush()
-
-                n += 1
+            TSs[mask] = [res[0] for res in result]
+            for key in xmins.dtype.names:
+                xmins[key][mask] = [res[1][key] for res in result]
 
             return TSs, xmins
 
@@ -807,12 +770,6 @@ class PointSourceLLH(object):
             return result
 
         # bounds for seeding values
-        seed_bounds = dict([(par, (np.mean(bound) - _b_eps*np.diff(bound)/2.,
-                                   np.mean(bound) + _b_eps*np.diff(bound)/2.))
-                                if not par == "nsources"
-                                else (par, np.array([0., np.inf]))
-                            for par, bound in zip(self.params,
-                                                  self.par_bounds)])
         par_dtypes = [(par, np.float) for par in self.params]
 
         decRange = kwargs.pop("decRange", np.arcsin(self.sinDec_range))
@@ -863,7 +820,6 @@ class PointSourceLLH(object):
                                     [decRange] + self.hemispheres.values()))
             dec_bound = dec_bound[(dec_bound >= decRange[0])
                                   &(dec_bound <= decRange[1])]
-            print(dec_bound)
 
             for ldec, udec in zip(dec_bound[:-1], dec_bound[1:]):
                 print("\tDec. {0:-5.1f} to {1:-5.1f} deg".format(
@@ -888,16 +844,14 @@ class PointSourceLLH(object):
                             * hp.pixelfunc.nside2pixarea(nside) / np.pi,
                         np.sum(mask, dtype=np.float) / len(mask)))
 
-            print("\tStart all-sky scan")
-            start = time.clock()
+            start = time.time()
 
             TSs, xmins = do_scan(ra, dec, TSs, xmins, mask, **kwargs)
 
-            stop = time.clock()
+            stop = time.time()
 
             mins, secs = divmod(stop - start, 60)
             hours, mins = divmod(mins, 60)
-            print()
             print("\tScan finished after {0:3d}h {1:2d}' {2:4.2f}''".format(
                     int(hours), int(mins), secs))
 
@@ -930,8 +884,6 @@ class PointSourceLLH(object):
 
             sys.stdout.flush()
 
-        # inifinite loop end
-
         return
 
     def do_trials(self, src_dec, **kwargs):
@@ -947,137 +899,58 @@ class PointSourceLLH(object):
 
         Returns
         -------
-        dict
-            Dictionary with fit results of each scan, the `TS` quantile at
-            `beta`, `beta` and its error, and the number of injected sources
-            per trial `n_inj`.
+        trials : recarray
+            recarray with fields of fit-values and test-statistic plus number
+            of injected events, if any.
 
         Other parameters
         ----------------
         mu_gen : iterator
             Iterator yielding injected events. Stored at ps_injector.
 
-        miniter maxiter : int
-            Minimium and Maximum amount of iterations before stopping.
-
-        TSval : float
-            TS value at which to calculate the overlap `beta`.
-
         n_iter : int
-            If given, do exactly that many iterations
-
-        eps : float
-            Accuracy < 1 of the overlap `beta` before breaking the scrambling.
-
-        beta_val : float
-            Targeted `beta`. Break, if scrambling is too far away of this
-            value.
-
-        n_sig : float
-            Break, if `beta` differs by more than `n_sig` with respect to the
-            targeted value.
+            Number of iterations to do
 
         kwargs
             Other keyword arguments are passed to the source fitting.
 
-        .. note:: Possible Modes
-                  Background scrambles:
-                    Calculate the TS value at a given percentile *beta_val*.
-                  Signal scrambles:
-                    Calculate the precentile *beta* for a given *TSval*.
-                    Break, if the precision of *beta* is good enough or the
-                    obtained value is too far away from the wanted *beta_val*
-
         """
-        start  = time.clock()
-
         mu_gen = kwargs.pop("mu", repeat((0, None)))
+        n_iter = kwargs.pop("n_iter", _n_trials)
 
-        # values for iteration procedure
-        maxiter = int(kwargs.pop("maxiter", _max_iter))
-        miniter = int(kwargs.pop("miniter", _min_iter))
-        TSval = kwargs.pop("TSval", _TSval)
-        eps = kwargs.pop("eps", _eps)
-        beta_val = kwargs.pop("beta_val", _beta_val)
-        n_sig = kwargs.pop("n_sig", _n_sig)
+        trials = np.empty((n_iter, ), dtype=[("n_inj", np.int),
+                                             ("TS", np.float)]
+                                            + [(par, np.float)
+                                               for par in self.params])
 
-        if "n_iter" in kwargs:
-            maxiter = miniter = kwargs.pop("n_iter")
+        samples = [mu_gen.next() for i in xrange(n_iter)]
+        trials["n_inj"] = [sam[0] for sam in samples]
+        samples = [sam[1] for sam in samples]
 
-        if n_sig <= 1.:
-            raise ValueError(
-                "n_sig has to be bigger than one due to breaking conditions.")
+        if self.ncpu > 1 and len(samples) > self.ncpu:
+            pool = multiprocessing.Pool(self.ncpu)
 
-        # start looping over scrambles
-        mus = list()
-        TSs = list()
-        xmins = dict([(par, []) for par in self.params])
-        for i in xrange(1, int(maxiter) + 1):
-            # inject events if injector is given and initialized
-            n_inj, inj_sample = mu_gen.next()
+            args = [(self, np.pi, src_dec, sam, True, kwargs)
+                    for sam in samples]
 
-            TS_i, xmin_i = self.fit_source(np.pi, src_dec,
-                                           inject=inj_sample, scramble=True,
-                                           **kwargs)
+            result = pool.map(fs, args, len(args) // (2 * self.ncpu) + 1)
 
-            TSs.append(TS_i)
-            mus.append(n_inj)
-            for key, value in xmin_i.iteritems():
-                xmins[key].append(value)
-
-            # get the value and error of the test-statistic at a given beta
-            TS_beta = np.percentile(TSs, 100.*(1. - beta_val))
-
-            # calculate the percentile of values bigger than given TS,
-            # if no TSval is given, use percentile value for beta cross-check
-            m = np.count_nonzero(
-                  np.asarray(TSs) > (TSval if TSval is not None else TS_beta))
-            beta = float(m) / float(i)
-            beta_err = (np.sqrt(beta * (1. - beta) / float(i)) if 0 < beta < 1
-                                                               else 1.)
-
-            # calculate the relative difference of beta to beta_val
-            dsig_beta = np.fabs(beta - beta_val) / beta_err
-
-            # check if any of the convergence criterions is met
-            if (i > miniter and (beta_err < eps or dsig_beta > n_sig)):
-                logger.debug("Finished after {0:d} iterations".format(i))
-                break
-
-            # As long as precision is not reached, give recent output
-            if i % (max(1, int(self._out_print * maxiter))) == 0:
-                stop = time.clock()
-                mins, secs = divmod(stop - start, 60)
-                logger.debug(
-                    ("{0:6d} of max {1:6d} scrambles completed after "+
-                     "{2:2.0f}' {3:4.1f}'', precision: {4:.2f}").format(
-                           i, maxiter, mins, secs, beta_err))
-
+            pool.close()
+            pool.join()
+            del pool
         else:
-            if miniter < maxiter:
-                logger.warn("Iterations ended before converge "+
-                            "criterion was met.")
-                logger.info("\tTrials  = {0:6d}\n".format(i)+
-                            "\tBeta    = {0:7.2%} +/- {1:7.2%}\n".format(
-                                        beta, beta_err)+
-                            "\tOverfl. = {0:6d}".format(
-                                        np.count_nonzero(np.asarray(TSs) > 0)))
+            result = [self.fit_source(np.pi, src_dec,
+                                      inject=sam, scramble=True, **kwargs)
+                      for sam in samples]
 
-        TSs = np.asarray(TSs)
-        xmins = dict([(key, np.asarray(value))
-                      for key, value in xmins.iteritems()])
+        for i, res in enumerate(result):
+            trials["TS"][i] = res[0]
+            for key, val in res[1].iteritems():
+                trials[key][i] = val
 
-        # return each trial result with its fit parameters,
-        # the test statistic value matching beta, beta and its error as well as
-        result = dict(TS=TSs, TS_beta=TS_beta, beta=beta, beta_err=beta_err,
-                      n_inj=mus, **xmins)
+        return trials
 
-        # reset event selection, because trials are run on scrambles
-        self.reset()
-
-        return result
-
-    def llh(self, **fit_pars):
+    def llh(self, src_ra, src_dec, ev, **fit_pars):
         r"""Calculate the likelihood ratio for the selected events.
 
         Evaluate pointsource likelihood using cached values. For new input,
@@ -1103,14 +976,12 @@ class PointSourceLLH(object):
 
         nsources = fit_pars.pop("nsources")
 
-        N = self._N
-        n = self._n
+        n = len(ev)
+        N = self.N
 
-        assert(n == len(self._ev))
+        SoB = ev["S"] / ev["B"]
 
-        SoB = self._ev_S / self._ev_B
-
-        w, grad_w = self.llh_model.weight(self._ev, **fit_pars)
+        w, grad_w = self.llh_model.weight(ev, **fit_pars)
 
         x = (SoB * w - 1.) / N
 
@@ -1136,7 +1007,7 @@ class PointSourceLLH(object):
         ns_grad[xmask] = x[xmask] / (1. + alpha[xmask])
         ns_grad[~xmask] = (x[~xmask] / (1. + aval)
                        - x[~xmask] * (alpha[~xmask] - aval) / (1. + aval)**2)
-        ns_grad = ns_grad.sum() - (N - self._n) / (N - nsources)
+        ns_grad = ns_grad.sum() - (N - n) / (N - nsources)
 
         # in weights
         if grad_w is not None:
@@ -1200,7 +1071,7 @@ class PointSourceLLH(object):
 
             fit_pars = dict([(par, xi) for par, xi in zip(self.params, x)])
 
-            fun, grad = self.llh(**fit_pars)
+            fun, grad = self.llh(src_ra, src_dec, ev, **fit_pars)
 
             # return negative value needed for minimization
             return -fun, -grad
@@ -1210,7 +1081,10 @@ class PointSourceLLH(object):
         kwargs.setdefault("pgtol", _pgtol)
 
         # Set all weights once for this src location, if not already cached
-        self._select_events(src_ra, src_dec, inject=inject, scramble=scramble)
+        ev = self._select_events(src_ra, src_dec, inject=inject, scramble=scramble)
+
+        n = (len(ev) if not isinstance(ev, dict)
+                     else sum([len(ev_i) for ev_i in ev.itervalues()]))
 
         # get seeds
         pars = self.par_seeds
@@ -1224,10 +1098,10 @@ class PointSourceLLH(object):
                                 bounds=self.par_bounds,
                                 **kwargs)
 
-        if abs(xmin[0]) > _rho_max * self._n:
+        if abs(xmin[0]) > _rho_max * n:
             logger.error(("nsources > {0:7.2%} * {1:6d} selected events, "+
                           "fit-value nsources = {2:8.1f}").format(
-                              _rho_max, self._n, xmin[0]))
+                              _rho_max, n, xmin[0]))
 
         xmin = dict([(par, xi) for par, xi in zip(self.params, xmin)])
 
@@ -1274,16 +1148,11 @@ class PointSourceLLH(object):
 
             """
 
-            # check if new source selection has to be done
-            if not (x[0] == self._src_ra and x[1] == self._src_dec):
-                self._select_events(x[0], x[1])
+            ev = self._select_events(x[0], x[1])
 
-            # forget about source position
-            x = x[2:]
+            fit_pars = dict([(par, xi) for par, xi in zip(self.params, x[2:])])
 
-            fit_pars = dict([(par, xi) for par, xi in zip(self.params, x)])
-
-            fun, grad = self.llh(**fit_pars)
+            fun, grad = self.llh(x[0], x[1], ev, **fit_pars)
 
             # return negative value needed for minimization
             return -fun
@@ -1307,11 +1176,6 @@ class PointSourceLLH(object):
                                 _llh, pars, bounds=bounds,
                                 approx_grad=True, **kwargs)
 
-        if abs(xmin[0]) > _rho_max * self._n:
-            logger.error(("nsources > {0:7.2%} * {1:6d} selected events, "+
-                          "fit-value nsources = {2:8.1f}").format(
-                              _rho_max, self._n, xmin[0]))
-
         xmin = dict([("ra", xmin[0]), ("dec", xmin[1])]
                     + [(par, xi) for par, xi in zip(self.params, xmin[2:])])
 
@@ -1320,23 +1184,6 @@ class PointSourceLLH(object):
 
         return fmin, xmin
 
-    def reset(self):
-        r"""Reset all cached values.
-
-        """
-        self._N = _n
-
-        self._src_ra = _src_ra
-        self._src_dec = _src_dec
-
-        self._ev = _ev
-        self._ev_B = _ev_B
-        self._ev_S = _ev_S
-
-        self.llh_model.reset()
-
-        return
-
     def weighted_sensitivity(self, src_dec, alpha, beta, inj, **kwargs):
         """Calculate the point source sensitivity for a given source
         hypothesis using weights.
@@ -1344,36 +1191,59 @@ class PointSourceLLH(object):
         All trials calculated are used at each step and weighted using the
         Poissonian probability.
 
-        Credits for this idea goes to Asen.
+        Credits for this idea goes to Asen Christov of IceCube.
 
         Parameters
         ----------
         src_dec : float
             Source position(s)
-
-        alpha : float
+        alpha : array-like (m, )
             Error of first kind
-
-        beta : float
+        beta : array-like (m, )
             Error of second kind
-
         inj : skylab.BaseInjector instance
             Injection module
 
         Returns
         -------
-        flux : array_like
+        dict containing of the following kinds:
+
+        flux : array-like (m, )
             Flux needed to reach sensitivity of *alpha*, *beta*
-
-        TSval : array-like
+        mu : array-like (m, )
+            Number of injected events
+        TSval : array-like (m, )
             All trials calculated
-
-        w : array-like
+        alpha : array-like
+            Error of first kind
+        beta : array-like
+            Error of second kind
+        weights : array-like (m, n)
             Weights for each trial for corresponding flux-limit.
+        trials : recarray (n, )
+            Array contatining all fit information and injection information for
+            each trial
+
+        Optional Parameters
+        --------------------
+        n_bckg : int
+            Number of background trials to do if needed
+        n_iter : int
+            Number of trials to do per iteration
+        fit : None, callable or str
+            If callable, fit.isf(alpha) will be called to calculate the
+            test statistic value if not known. A str defines different
+            functions: Possible fits: ["chi2", "exp"]
+        fit_kw : dict
+            Keyword arguments passed to the fitting of the function.
+        TSval : array-like (m, )
+            Test statistic values to fit for, makes alpha obsolete.
+        eps : float
+            Wanted precision for beta before breaking.
 
         """
 
-        def do_estimation(TSval, beta, mu, mu_TS, mu_xmin):
+        def do_estimation(TSval, beta, trials):
             r"""Perform sensitivity estimation by varying the injected source
             strength until the scrambling yields a test statistic with the
             wanted value of *beta*.
@@ -1384,66 +1254,75 @@ class PointSourceLLH(object):
                   "\tbeta  = {0:7.2%}".format(beta))
             print()
 
-            if (len(mu) < 1 or (not np.any(mu > 0))
-                    or (not np.any(mu_TS[mu > 0] > TSval))):
+            if (len(trials) < 1 or (not np.any(trials["n_inj"] > 0))
+                    or (not np.any(trials["TS"][trials["n_inj"] > 0] > TSval))):
                 # if no events have been injected, do quick estimation
                 # of active region by doing a few trials
 
                 print("Quick estimate of active region, " +
                       "inject increasing number of events ...")
 
-                n_inj = int(np.mean(mu)) if len(mu) > 0 else 0
+                n_inj = int(np.median(trials["n_inj"])) if len(trials) > 0 else 0
                 while True:
-                    # break if *beta* percent of injected trials are above the
-                    # wanted threshold
-                    n_sig = np.count_nonzero(mu > 0)
-                    p_up = (float(np.count_nonzero(
-                                        mu_TS[mu > 0] > TSval))
-                                / n_inj if n_sig > 0 else 0.)
-
-                    if n_sig > 1 and p_up > beta:
-                        break
-
-                    n_inj += 1
-                    n_inj, sample = inj.sample(n_inj, poisson=False).next()
-
+                    n_inj, sample = inj.sample(n_inj + 1, poisson=False).next()
                     TS_i, xmin_i = self.fit_source(np.pi, src_dec,
                                                    inject=sample,
                                                    scramble=True)
 
-                    mu = np.append(mu, n_inj)
-                    mu_TS = np.append(mu_TS, TS_i)
-                    for par, val in xmin_i.iteritems():
-                        mu_xmin[par] = np.append(mu_xmin[par], val)
+                    trial_i = np.empty((1, ), dtype=trials.dtype)
+                    trial_i["n_inj"] = n_inj
+                    trial_i["TS"] = TS_i
+                    for par in self.params:
+                        trial_i[par] = xmin_i[par]
 
-                    mu_eff = np.sqrt(n_inj)
+                    trials = np.append(trials, trial_i)
+
+                    # get mean TS per n_inj events
+                    mTS = np.bincount(trials["n_inj"], weights=trials["TS"])
+                    mW = np.bincount(trials["n_inj"])
+                    mTS[mW > 0] /= mW[mW > 0]
+
+                    # calculate running mean of TS
+                    nkern = np.ceil(np.sqrt(n_inj + 1))
+                    kernel = np.ones(nkern, dtype=np.float)
+                    rmean = np.convolve(mTS, kernel, mode="valid")
+                    rmean /= np.sum(kernel)
+                    rmean_sq = np.convolve(mTS**2, kernel, mode="valid")
+                    rmean_sq /= np.sum(kernel)
+                    rmean_err = np.sqrt(rmean_sq - rmean**2)
+                    xmean = np.convolve(np.arange(n_inj + 1), kernel, mode="valid")
+                    xmean /= np.sum(kernel)
+
+                    if len(xmean) > 2:
+                        fact = scipy.stats.norm.isf(1. - beta)
+                        resid = (rmean - TSval) / rmean_err
+                        up_p = float(np.count_nonzero(resid > 1)) / len(resid)
+
+                        if up_p > beta:
+                            mu_eff = np.median(xmean[(xmean > 0)&(resid > 0)])
+
+                            break
 
                 print("\tActive region: {0:5.1f}".format(mu_eff))
                 print()
 
                 # do trials around active region
-                trial = self.do_trials(src_dec, TSval=TSval, beta_val=beta,
-                                       mu=inj.sample(mu_eff),
-                                       n_iter=n_iter, **kwargs)
-
-                mu = np.append(mu, trial["n_inj"])
-                mu_TS = np.append(mu_TS, trial["TS"])
-                for par, val in mu_xmin.iteritems():
-                    mu_xmin[par] = np.append(val, trial[par])
+                trials = np.append(trials,
+                                   self.do_trials(src_dec, mu=inj.sample(mu_eff),
+                                                  n_iter=n_iter, **kwargs))
 
             # start estimation
-            for i in xrange(1, maxtrial + 1):
+            i = 1
+            while True:
                 # use existing scrambles to determine best starting point
                 fun = lambda n: np.log10(
-                                    (utils.poisson_percentile(n, mu, mu_TS,
+                                    (utils.poisson_percentile(n, trials["n_inj"],
+                                                              trials["TS"],
                                                               TSval)[0]
                                      - beta)**2)
 
-                # do not fit values too high for sampled distributions
-                ub = np.percentile(mu[mu > 0], _ub_perc)
-
                 # fit values in region where sampled before
-                bounds = np.percentile(mu[mu > 0],
+                bounds = np.percentile(trials["n_inj"][trials["n_inj"] > 0],
                                        [_ub_perc, 100. - _ub_perc])
 
                 print("\tEstimate sens. in region {0:5.1f} to {1:5.1f}".format(
@@ -1454,27 +1333,28 @@ class PointSourceLLH(object):
 
                 # fit closest point to beta value
                 x, f, info = scipy.optimize.fmin_l_bfgs_b(
-                                    fun, [ind], bounds=[bounds],#[(0., ub)],
+                                    fun, [ind], bounds=[bounds],
                                     approx_grad=True)
 
                 mu_eff = np.asscalar(x)
 
                 # get the statistical uncertainty of the quantile
-                b, b_err = utils.poisson_percentile(mu_eff, mu, mu_TS, TSval)
+                b, b_err = utils.poisson_percentile(mu_eff, trials["n_inj"],
+                                                    trials["TS"], TSval)
 
                 print("\t\tBest estimate: {0:6.2f}, ({1:7.2%} +/- {2:8.3%})".format(
                             mu_eff, b, b_err))
 
                 # if precision is high enough and fit did converge,
                 # the wanted values is reached, stop trial computation
-                if (i > 1 and b_err < kwargs["eps"]
+                if (i > 1 and b_err < eps
                         and mu_eff > bounds[0] and mu_eff < bounds[-1]
-                        and np.fabs(b - beta) < kwargs["eps"]):
+                        and np.fabs(b - beta) < eps):
                     break
 
                 # to avoid a spiral with too few events we want only half
                 # of all events to be background scrambles
-                p_bckg = np.sum(mu == 0, dtype=np.float) / len(mu)
+                p_bckg = np.sum(trials["n_inj"] == 0, dtype=np.float) / len(trials)
                 mu_eff_min = np.log(1. / (1. - p_bckg))
                 mu_eff = np.amax([mu_eff, mu_eff_min])
 
@@ -1482,40 +1362,37 @@ class PointSourceLLH(object):
                             n_iter, mu_eff))
 
                 # do trials with best estimate
-                trial = self.do_trials(src_dec, TSval=TSval, beta_val=beta,
-                                       mu=inj.sample(mu_eff),
-                                       n_iter=n_iter, **kwargs)
-
-                mu = np.append(mu, trial["n_inj"])
-                mu_TS = np.append(mu_TS, trial["TS"])
-                for par, val in mu_xmin.iteritems():
-                    mu_xmin[par] = np.append(val, trial[par])
+                trials = np.append(trials,
+                                   self.do_trials(src_dec, mu=inj.sample(mu_eff),
+                                                  n_iter=n_iter, **kwargs))
 
                 sys.stdout.flush()
 
-            else:
-                logger.warn("Trials ended before converge "+
-                            "criterion was met.")
+                i += 1
 
             # save all trials
 
-            return mu_eff, mu, mu_TS, mu_xmin
+            return mu_eff, trials
 
-        start = time.clock()
+        start = time.time()
 
         # configuration
-        maxtrial = int(kwargs.pop("maxtrial", _max_trial))
+        n_bckg = int(kwargs.pop("n_bckg", _n_trials))
         n_iter = int(kwargs.pop("n_iter", _n_iter))
-        kwargs.setdefault("eps", _eps)
-        fit = kwargs.pop("fit", None)
+        eps = kwargs.pop("eps", _eps)
+        fit = kwargs.pop("fit", "chi2")
+        fit_kw = kwargs.pop("fit_kw", dict())
 
-        if fit is not None and not hasattr(fit, "isf"):
-            raise AttributeError("fit must have attribute 'isf(alpha)'!")
+        if isinstance(fit, str):
+            if not fit in ["exp", "chi2"]:
+                raise ValueError("Do not know fit-function", fit)
+        elif not hasattr(fit, "__call__"):
+            raise AttributeError("fit callable")
 
         # all input values as lists
         alpha = np.atleast_1d(alpha)
         beta = np.atleast_1d(beta)
-        TSval = np.atleast_1d(kwargs.pop("TSval", [_TSval for i in alpha]))
+        TSval = np.atleast_1d(kwargs.pop("TSval", [None for i in alpha]))
         if not (len(alpha) == len(beta) == len(TSval)):
             raise ValueError("alpha, beta, and (if given) TSval must have "+
                              " same length!")
@@ -1526,73 +1403,73 @@ class PointSourceLLH(object):
         print("Estimate Sensitivity for declination {0:5.1f} deg".format(
                 np.degrees(src_dec)))
 
-        # storage of all trials
-        mu = np.array([], dtype=np.int)
-        mu_TS = np.array([], dtype=np.float)
-        mu_xmin = dict([(par, np.array([], dtype=np.float))
-                        for par in self.params])
-
         # result list
         TS = list()
         mu_flux = list()
         flux = list()
+        trials = np.empty((0, ), dtype=[("n_inj", np.int), ("TS", np.float)]
+                                       + [(par, np.float)
+                                          for par in self.params])
 
         for i, (TSval_i, alpha_i, beta_i) in enumerate(zip(TSval, alpha, beta)):
 
             if TSval_i is None:
                 # Need to calculate TS value for given alpha values
-                if fit == None:
+                if not hasattr(fit, "__call__"):
                     # No parametrization of background given, do scrambles
                     print("\tDo background scrambles for estimation of "+
                           "TS value for alpha = {0:7.2%}".format(alpha_i))
 
-                    bckg_trials = self.do_trials(src_dec, beta_val=alpha_i,
-                                                 **kwargs)
+                    trials = np.append(trials,
+                                       self.do_trials(src_dec, n_iter=n_bckg,
+                                                      **kwargs))
 
-                    # use background scrambles for sensitivity estimation
-                    mu = np.append(mu, bckg_trials["n_inj"])
-                    mu_TS = np.append(mu_TS, bckg_trials["TS"])
-                    for par in mu_xmin.iterkeys():
-                        mu_xmin[par] = np.append(mu_xmin[par],
-                                                 bckg_trials[par])
+                    bckg = trials["n_inj"] == 0
 
-                    stop = time.clock()
+                    stop = time.time()
                     mins, secs = divmod(stop - start, 60)
                     hours, mins = divmod(mins, 60)
-
                     print("\t{0:6d} Background scrambles finished ".format(
-                                len(bckg_trials["TS"]))+
+                                len(trials["TS"][bckg]))+
                           "after {0:3d}h {1:2d}' {2:4.2f}''".format(
                               int(hours), int(mins), secs))
 
-                    print("Fit background function to scrambles")
-                    if self.rho_nsource_bounds[0] < 0:
-                        print("Fit two sided chi2 to background scrambles")
-                        fitfun = utils.twoside_chi2
-                    else:
-                        print("Fit delta chi2 to background scrambles")
-                        fitfun = utils.delta_chi2
-                    fit = fitfun(bckg_trials["TS"], df=2.,
-                                 floc=0., fscale=1.)
+                    print("Fit background function: {0:s}".format(fit))
+                    if fit == "chi2":
+                        if self.nsource_bounds[0] < 0:
+                            fun = utils.twoside_chi2
+                            fit_kw.setdefault("chi1", dict(df=len(self.params),
+                                                           floc=0., fscale=1.))
+                            fit_kw.setdefault("chi2", dict(df=len(self.params),
+                                                           floc=0., fscale=1.))
+                        else:
+                            fun = utils.delta_chi2
+                            fit_kw = dict(df=len(self.params),
+                                          floc=0., fscale=1.)
+
+                    elif fit == "exp":
+                        fun = utils.delta_exp
+                        fit_kw.setdefault("deg", 1)
+
+                    # fit data to function
+                    fit = fun(trials["TS"][bckg], **fit_kw)
 
                     # give information about the fit
                     print(fit)
 
-                else:
-                    bckg_trials = None
-
                 # use fitted function to calculate needed TS-value
-                TSval_i = np.asscalar(fit.isf(alpha_i))
+                TSval_i = fit(alpha_i)
+
+                sys.stdout.flush()
 
             # calculate sensitivity
-            mu_i, mu, mu_TS, mu_xmin = do_estimation(TSval_i, beta_i,
-                                                     mu, mu_TS, mu_xmin)
+            mu_i, trials = do_estimation(TSval_i, beta_i, trials)
 
             TS.append(TSval_i)
             mu_flux.append(mu_i)
             flux.append(inj.mu2flux(mu_i))
 
-            stop = time.clock()
+            stop = time.time()
 
             mins, secs = divmod(stop - start, 60)
             hours, mins = divmod(mins, 60)
@@ -1601,13 +1478,14 @@ class PointSourceLLH(object):
                                                       secs))
             print("\t\tInjected: {0:6.2f}".format(mu_i))
             print("\t\tFlux    : {0:.2e}".format(flux[-1]))
-            print("\t\tTrials  : {0:6d}".format(len(mu)))
+            print("\t\tTrials  : {0:6d}".format(len(trials)))
             print("\t\tTime    : {0:6.2f} trial(s) / sec".format(
-                                            float(len(mu)) / (stop - start)))
+                                            float(len(trials)) / (stop - start)))
             print()
 
             sys.stdout.flush()
 
+        '''
         trials = np.empty((len(mu), ),
                           dtype=[("n_inj", np.int), ("TS", np.float)]
                                 + [(xmin_i, np.float)
@@ -1616,9 +1494,13 @@ class PointSourceLLH(object):
         trials["TS"] = np.asarray(mu_TS)
         for key, arr in mu_xmin.iteritems():
             trials[key] = arr
+        '''
+
+        w = np.vstack([utils.poisson_weight(trials["n_inj"], mu_i)
+                       for mu_i in mu_flux])
 
         result = dict(flux=flux, mu=mu_flux, TSval=TS, alpha=alpha, beta=beta,
-                      fit=fit, trials=trials)
+                      fit=fit, trials=trials, weights=w)
 
         return result
 
@@ -1860,6 +1742,8 @@ class MultiPointSourceLLH(PointSourceLLH):
 
         inject = kwargs.pop("inject", None)
 
+        ev_dict = dict()
+
         # inject events according to their parent sample
         for enum, sam in self._sams.iteritems():
 
@@ -1868,11 +1752,10 @@ class MultiPointSourceLLH(PointSourceLLH):
             else:
                 inj_i = inject
 
-            sam._select_events(src_ra, src_dec, inject=inj_i, **kwargs)
+            ev_dict[enum] = sam._select_events(src_ra, src_dec,
+                                               inject=inj_i, **kwargs)
 
-        self._n = sum([sam._n for sam in self._sams.itervalues()])
-
-        return
+        return ev_dict
 
     @property
     def N(self):
@@ -1890,7 +1773,7 @@ class MultiPointSourceLLH(PointSourceLLH):
     def gamma_bins(self, value):
         value = np.atleast_1d(value)
         if len(value) < 2:
-            raise ValueError("Need exact bin-edges!")
+            raise ValueError("Need bin denfinitions")
 
         self._gamma_bins = value
 
@@ -1918,9 +1801,7 @@ class MultiPointSourceLLH(PointSourceLLH):
         par_bounds = [(np.amax(pb[:, 0]), np.amin(pb[:, 1]))
                       for pb in par_bounds]
 
-        ns = sum([sam._n for sam in self._sams.itervalues()])
-
-        return np.array([ns * np.array(self._rho_nsource_bounds)]
+        return np.array([np.array(self.nsource_bounds)]
                         + par_bounds)
 
     @property
@@ -1933,16 +1814,7 @@ class MultiPointSourceLLH(PointSourceLLH):
                                                          else []))
                      for par in self.params[1:]]
 
-        # get weighted sum of the events for nsources
-        gamma = (par_seeds[self.params[1:].index("gamma")]
-                    if "gamma" in self.params else self._gamma_def)
-
-        ns = sum([self._sams[enum]._n * w
-                  for enum, w in self.powerlaw_weights(
-                        self._src_dec, gamma=gamma).iteritems()])
-        N = ns * self._rho_nsource
-
-        return np.array([N] + par_seeds)
+        return np.array([self.nsource] + par_seeds)
 
     @property
     def sindec_bins(self):
@@ -2009,7 +1881,7 @@ class MultiPointSourceLLH(PointSourceLLH):
 
         return
 
-    def llh(self, **fit_pars):
+    def llh(self, src_ra, src_dec, ev, **fit_pars):
         r"""LLH for multi-sample is the sum of all Likelihood functions.
 
         The number of fitted source neutrinos is distributed between
@@ -2023,14 +1895,13 @@ class MultiPointSourceLLH(PointSourceLLH):
         Returns
         --------
         logLambda : float
-            Log Likelihood value at the point *fit_pars*.
+            Log Likelihood value
 
         logLambda_grad : array-like
-            Gradient at the point *fit_pars*.
+            Gradient
 
         """
 
-        src_dec = self._src_dec
         nsources = fit_pars.pop("nsources")
 
         w = self.powerlaw_weights(src_dec, **fit_pars)
@@ -2039,7 +1910,8 @@ class MultiPointSourceLLH(PointSourceLLH):
         nsw = dict([(enum, wj*nsources) for enum, wj in w.iteritems()])
 
         # likelihood evaluation on each sample
-        LLH_eval = dict([(enum, sam.llh(nsources=nsw[enum], **fit_pars))
+        LLH_eval = dict([(enum, sam.llh(src_ra, src_dec, ev[enum],
+                                        nsources=nsw[enum], **fit_pars))
                          for enum, sam in self._sams.iteritems()])
 
         # sum up individual contributions
@@ -2134,4 +2006,9 @@ class MultiPointSourceLLH(PointSourceLLH):
             obj.reset()
 
         return
+
+def fs(args):
+    llh, ra, dec, inject, scramble, kwargs = args
+    return llh.fit_source(ra, dec, inject=inject, scramble=scramble,
+                          **kwargs)
 
