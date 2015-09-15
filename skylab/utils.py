@@ -300,6 +300,15 @@ class delta_exp(object):
                 "\tPolynomial           : " + "\t".join(["{0:-.2e}".format(pi)
                                                          for pi in self.p]))
 
+    def pdf(self, val):
+        r"""Probability densitiy function
+
+        """
+        return np.where(val > 0.,
+                        np.polyval(np.polyder(self.p), val)
+                            * np.exp(np.polyval(self.p, val)),
+                        self.eta)
+
     def sf(self, val):
         r"""Survival function.
 

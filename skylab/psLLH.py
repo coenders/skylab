@@ -45,6 +45,7 @@ from . import set_pars
 from . import ps_model
 from . import utils
 
+
 # get module logger
 def trace(self, message, *args, **kwargs):
     r"""Add trace to logger with output level beyond debug
@@ -52,6 +53,7 @@ def trace(self, message, *args, **kwargs):
     """
     if self.isEnabledFor(5):
         self._log(5, message, args, **kwargs)
+
 
 logging.addLevelName(5, "TRACE")
 logging.Logger.trace = trace
@@ -208,7 +210,7 @@ class PointSourceLLH(object):
         """
 
         if upscale and not scramble:
-            raise ValueError("Cannot upscale UNBLINDED data, "+
+            raise ValueError("Cannot upscale UNBLINDED data, " +
                              "turn on scrambling!")
 
         # UPSCALING
@@ -242,50 +244,66 @@ class PointSourceLLH(object):
             mu = RS.poisson(fact * len(exp))
 
             if up_seed is not None:
-                print(("\tSample {0:6d} events from exp. data "+
-                       "from {1:6.1f} to {2:6.1f} days (x {3:4.1f}), "+
-                       "seed {4:7d}").format(
-                        mu, livetime, up_livetime, fact, up_seed))
+                print(("\tSample {0:6d} events from exp. data " +
+                       "from {1:6.1f} to {2:6.1f} days (x {3:4.1f}), " +
+                       "seed {4:7d}").format(mu, livetime, up_livetime,
+                                             fact, up_seed))
             else:
-                print(("\tSample {0:6d} events from exp. data "+
-                       "from {1:6.1f} to {2:6.1f} days (x {3:4.1f})").format(
-                        mu, livetime, up_livetime, fact))
+                print(("\tSample {0:6d} events from exp. data " +
+                       "from {1:6.1f} to {2:6.1f} days " +
+                       "(x {3:4.1f})").format(mu, livetime, up_livetime, fact))
 
             # update livetime
             livetime = up_livetime
 
             exp = RS.choice(exp, size=mu)
 
-        for name, val in zip(["exp", "mc"], [exp, mc]):
-            fields = val.dtype.fields.keys()
-            if not "sinDec" in fields:
-                val = numpy.lib.recfunctions.append_fields(
-                        val, "sinDec", np.sin(val["dec"]),
-                        dtypes=np.float, usemask=False)
-            setattr(self, name, val)
+        if "sinDec" not in exp.dtype.names:
+            exp = numpy.lib.recfunctions.append_fields(exp, "sinDec",
+                                                       np.sin(exp["dec"]),
+                                                       dtypes=np.float,
+                                                       usemask=False)
+
+        if "sinDec" not in mc.dtype.names:
+            mc = numpy.lib.recfunctions.append_fields(mc, "sinDec",
+                                                      np.sin(mc["dec"]),
+                                                      dtypes=np.float,
+                                                      usemask=False)
+
+        self.exp = exp
 
         # weight Monte Carlo weights by livetime in seconds
-        self.mc["ow"] *=  3600. * 24. * livetime
+        mc["ow"] *= 3600. * 24. * livetime
+        print(mc.dtype.names)
 
         # Experimental data values
         self.livetime = livetime
 
+        if "llh_model" in kwargs:
+            self.llh_model = kwargs.pop("llh_model")
+
         # set all other parameters
         set_pars(self, **kwargs)
+
+        # init llh-model splines
+        self.llh_model(self.exp, mc)
 
         # scramble data if not unblinded. Do this after seed has been set
         if scramble:
             self.exp["ra"] = self.random.uniform(0., 2. * np.pi, self.N)
         else:
-            print("\t####################################\n"+
-                  "\t# Working on >> UNBLINDED << data! #\n"+
+            print("\t####################################\n" +
+                  "\t# Working on >> UNBLINDED << data! #\n" +
                   "\t####################################\n")
 
-        # background will not change, calculate right-away
+        # background will not change, calculate right-away, reserve space for
+        # signal
+        if "S" in self.exp.dtype.names or "B" in self.exp.dtype.names:
+            raise KeyError("S and B are reserved for probability values")
         self.exp = numpy.lib.recfunctions.append_fields(
-                                 self.exp, "B",
-                                 self.llh_model.background(self.exp),
-                                 usemask=False)
+            self.exp, ["B", "S"],
+            [self.llh_model.background(self.exp), np.zeros(len(self.exp))],
+            usemask=False)
 
         return
 
@@ -294,42 +312,43 @@ class PointSourceLLH(object):
 
         """
         # Data information
-        sout = ("{0:s}\n"+
-                67*"-"+"\n"+
-                "Number of Data Events: {1:7d}\n"+
-                "\tZenith Range       : {2:6.1f} - {3:6.1f} deg\n"+
-                "\tlog10 Energy Range : {4:6.1f} - {5:6.1f}\n"+
+        sout = ("{0:s}\n" +
+                67*"-"+"\n" +
+                "Number of Data Events: {1:7d}\n" +
+                "\tZenith Range       : {2:6.1f} - {3:6.1f} deg\n" +
+                "\tlog10 Energy Range : {4:6.1f} - {5:6.1f}\n" +
                 "\tLivetime of sample : {6:7.2f} days\n").format(
-                         self.__repr__(),
-                         self.N,
-                         np.degrees(np.arcsin(np.amin(self.exp["sinDec"]))),
-                         np.degrees(np.arcsin(np.amax(self.exp["sinDec"]))),
-                         np.amin(self.exp["logE"]), np.amax(self.exp["logE"]),
-                         self.livetime)
+            self.__repr__(), self.N,
+            np.degrees(np.arcsin(np.amin(self.exp["sinDec"]))),
+            np.degrees(np.arcsin(np.amax(self.exp["sinDec"]))),
+            np.amin(self.exp["logE"]), np.amax(self.exp["logE"]),
+            self.livetime)
+
+        '''
         # Monte Carlo information
-        sout += (67*"-"+"\n"+
-                 "Number of MC Events  : {0:7d}\n"+
-                 "\tZenith Range       : {1:6.1f} - {2:6.1f} deg\n"+
+        sout += (67*"-"+"\n" +
+                 "Number of MC Events  : {0:7d}\n" +
+                 "\tZenith Range       : {1:6.1f} - {2:6.1f} deg\n" +
                  "\tlog10 Energy Range : {3:6.1f} - {4:6.1f}\n").format(
-                         len(self.mc),
-                         np.degrees(np.arcsin(np.amin(self.mc["sinDec"]))),
-                         np.degrees(np.arcsin(np.amax(self.mc["sinDec"]))),
-                         np.amin(self.mc["logE"]), np.amax(self.mc["logE"]))
+            len(self.mc),
+            np.degrees(np.arcsin(np.amin(self.mc["sinDec"]))),
+            np.degrees(np.arcsin(np.amax(self.mc["sinDec"]))),
+            np.amin(self.mc["logE"]), np.amax(self.mc["logE"]))
+        '''
 
         # LLH information
         sout += 67*"-"+"\n"
         sout += "Likelihood model:\n"
         sout += "{0:s}\n".format("\n\t".join(
-                        [i if len(set(i)) > 2
-                           else i[:-len("\t".expandtabs())]
-                         for i in str(self._llh_model).splitlines()]))
+            [i if len(set(i)) > 2 else i[:-len("\t".expandtabs())]
+             for i in str(self._llh_model).splitlines()]))
         sout += "Fit Parameter\tSeed\tBounds\n"
         pars = self.params
         seed = self.par_seeds
         bounds = self.par_bounds
         for p, s, b in zip(pars, seed, bounds):
             sout += "\t{0:15s}\t{1:.2f}\t{2:.2f} to {3:.2f}\n".format(
-                    p, s, *b)
+                p, s, *b)
         sout += 67*"-"
 
         return sout
@@ -360,19 +379,19 @@ class PointSourceLLH(object):
 
         # get the zenith band with correct boundaries
         dec = (np.pi - 2. * self.delta_ang) / np.pi * src_dec
-        min_dec = max(-np.pi / 2. , dec - self.delta_ang)
+        min_dec = max(-np.pi / 2., dec - self.delta_ang)
         max_dec = min(np.pi / 2., dec + self.delta_ang)
 
         dPhi = 2. * np.pi
 
-        if self.mode == "all" :
+        if self.mode == "all":
             # all events are selected
             exp_mask = np.ones_like(self.exp["sinDec"], dtype=np.bool)
 
         elif self.mode in ["band", "box"]:
             # get events that are within the declination band
             exp_mask = ((self.exp["sinDec"] > np.sin(min_dec))
-                        &(self.exp["sinDec"] < np.sin(max_dec)))
+                        & (self.exp["sinDec"] < np.sin(max_dec)))
 
         else:
             raise ValueError("Not supported mode: {0:s}".format(self.mode))
@@ -408,15 +427,13 @@ class PointSourceLLH(object):
                                                invert=True)]]
 
             ev = np.append(ev, numpy.lib.recfunctions.append_fields(
-                                        inject, "B",
-                                        self.llh_model.background(inject),
+                                        inject, ["B", "S"],
+                                        [self.llh_model.background(inject),
+                                         np.zeros(len(inject))],
                                         usemask=False))
 
         # calculate signal term
-        ev = numpy.lib.recfunctions.append_fields(
-                            ev, "S",
-                            self.llh_model.signal(src_ra, src_dec, ev),
-                            usemask=False)
+        ev["S"] = self.llh_model.signal(src_ra, src_dec, ev)
 
         # do not calculate values with signal below threshold
         ev_mask = ev["S"] > self.thresh_S
@@ -501,13 +518,9 @@ class PointSourceLLH(object):
     @llh_model.setter
     def llh_model(self, val):
         if not isinstance(val, ps_model.NullModel):
-            raise TypeError("LLH model should inherit from "
-                            +"ps_model.NullModel")
+            raise TypeError("LLH model not instance of ps_model.NullModel")
 
-        # set likelihood module to variable and fill it with data
         self._llh_model = val
-
-        self._llh_model(self.exp, self.mc)
 
         return
 
@@ -738,15 +751,15 @@ class PointSourceLLH(object):
                 pV = np.asscalar(pVal(fmin, np.sin(xmin["dec"])))
 
                 print(hem)
-                print(("Hottest Grid at ra = {0:6.1f}deg, dec = {1:6.1f}deg\n"+
-                       "\twith pVal  = {2:4.2f}\n"+
+                print(("Hottest Grid at ra = {0:6.1f}deg, dec = {1:6.1f}deg\n" +
+                       "\twith pVal  = {2:4.2f}\n" +
                        "\tand TS     = {3:4.2f} at\n").format(
                             np.degrees(hot["ra"]), np.degrees(hot["dec"]),
                             hot["pVal"], hot["TS"])+
                        "\n".join(["\t{0:10s} = {1:6.2f}".format(par, hot[par])
                                   for par in self.params]))
-                print(("Refit location: ra = {0:6.1f}deg, dec = {1:6.1f}deg\n"+
-                       "\twith pVal  = {2:4.2f}\n"+
+                print(("Refit location: ra = {0:6.1f}deg, dec = {1:6.1f}deg\n" +
+                       "\twith pVal  = {2:4.2f}\n" +
                        "\tand TS     = {3:4.2f} at\n").format(
                             np.degrees(xmin["ra"]), np.degrees(xmin["dec"]),
                             pV, fmin)+
@@ -933,7 +946,7 @@ class PointSourceLLH(object):
             args = [(self, np.pi, src_dec, sam, True, kwargs)
                     for sam in samples]
 
-            result = pool.map(fs, args, len(args) // (2 * self.ncpu) + 1)
+            result = pool.map(fs, args, len(args) // self.ncpu + 1)
 
             pool.close()
             pool.join()
@@ -1099,7 +1112,7 @@ class PointSourceLLH(object):
                                 **kwargs)
 
         if abs(xmin[0]) > _rho_max * n:
-            logger.error(("nsources > {0:7.2%} * {1:6d} selected events, "+
+            logger.error(("nsources > {0:7.2%} * {1:6d} selected events, " +
                           "fit-value nsources = {2:8.1f}").format(
                               _rho_max, n, xmin[0]))
 
@@ -1394,11 +1407,8 @@ class PointSourceLLH(object):
         beta = np.atleast_1d(beta)
         TSval = np.atleast_1d(kwargs.pop("TSval", [None for i in alpha]))
         if not (len(alpha) == len(beta) == len(TSval)):
-            raise ValueError("alpha, beta, and (if given) TSval must have "+
+            raise ValueError("alpha, beta, and (if given) TSval must have " +
                              " same length!")
-
-        # setup source injector
-        inj.fill(src_dec, self.mc)
 
         print("Estimate Sensitivity for declination {0:5.1f} deg".format(
                 np.degrees(src_dec)))
@@ -1417,7 +1427,7 @@ class PointSourceLLH(object):
                 # Need to calculate TS value for given alpha values
                 if not hasattr(fit, "__call__"):
                     # No parametrization of background given, do scrambles
-                    print("\tDo background scrambles for estimation of "+
+                    print("\tDo background scrambles for estimation of " +
                           "TS value for alpha = {0:7.2%}".format(alpha_i))
 
                     trials = np.append(trials,
@@ -1473,7 +1483,7 @@ class PointSourceLLH(object):
 
             mins, secs = divmod(stop - start, 60)
             hours, mins = divmod(mins, 60)
-            print("\tFinished after "+
+            print("\tFinished after " +
                   "{0:3d}h {1:2d}' {2:4.2f}''".format(int(hours), int(mins),
                                                       secs))
             print("\t\tInjected: {0:6.2f}".format(mu_i))
@@ -1624,7 +1634,7 @@ class PointSourceLLH(object):
             if float(n)/n_iters > out_print:
                 stop = time.clock()
                 mins, secs = divmod(stop - start, 60)
-                print(("\t{0:7.2%} after {1:2.0f}' {2:4.1f}'' "+
+                print(("\t{0:7.2%} after {1:2.0f}' {2:4.1f}'' " +
                        "({3:8d} of {4:8d})").format(
                         float(n)/n_iters, mins, secs, n, n_iters))
                 out_print += 0.1
@@ -1676,7 +1686,6 @@ class MultiPointSourceLLH(PointSourceLLH):
         self._sams = dict()
         self._nuhist = dict()
         self._nuspline = dict()
-        self.mc = dict()
 
         return
 
@@ -1859,6 +1868,8 @@ class MultiPointSourceLLH(PointSourceLLH):
         self._enum[enum] = name
         self._sams[enum] = obj
 
+        # TODO port to llh_model class
+
         # add mc info for injection
         self.mc[enum] = obj.mc
 
@@ -1994,18 +2005,6 @@ class MultiPointSourceLLH(PointSourceLLH):
 
         return out_dict
 
-    def reset(self):
-        r"""Reset all cached values for this class and all stored PS-samples.
-
-        """
-
-        self._src_ra = _src_ra
-        self._src_dec = _src_dec
-
-        for obj in self._sams.itervalues():
-            obj.reset()
-
-        return
 
 def fs(args):
     llh, ra, dec, inject, scramble, kwargs = args
