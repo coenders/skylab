@@ -180,7 +180,7 @@ class delta_chi2(object):
 
         """
 
-        return self.isf(val)
+        return self.isf(val).squeeze()
 
     def __getstate__(self):
         return dict(par=self.par, eta=self.eta, eta_err=self.eta_err,
@@ -280,15 +280,16 @@ class delta_exp(object):
 
         """
 
-        return self.isf(val)
+        return self.isf(val).squeeze()
 
     def __getstate__(self):
-        return dict(eta=self.eta, eta_err=self.eta_err, p=self.p)
+        return dict(eta=self.eta, eta_err=self.eta_err, p=self.p, deg=self.deg)
 
     def __setstate(self, state):
         self.eta = state.pop("eta")
         self.eta_err = state.pop("eta_err")
         self.p = state.pop("p")
+        self.deg = state.pop("deg")
 
         return
 
@@ -296,8 +297,8 @@ class delta_exp(object):
         return ("Exponential with delta peak: {0:s}\n".format(self.__repr__()) +
                 "\tSeparation factor = {0:8.3%} +/- {1:8.3%}\n".format(
                     self.eta, self.eta_err) +
-                "\tDegrees of polynomial: {0:d}\n".format(self.deg) +
-                "\tPolynomial           : " + "\t".join(["{0:-.2e}".format(pi)
+                "\tDegrees of polynomial: {0:d}\n".format(len(self.p)) +
+                "\tPolynomial           : " + "\t".join(["{0:+.2e}".format(pi)
                                                          for pi in self.p]))
 
     def sf(self, val):
@@ -315,7 +316,7 @@ class delta_exp(object):
             # value in delta-peak
             return 0.
 
-        p = self.p
+        p = np.copy(self.p)
         p[-1] -= np.log(val)
 
         r = np.roots(p)
@@ -323,7 +324,7 @@ class delta_exp(object):
         r = r[np.isreal(r)]
         r = r[r > 0]
 
-        return np.amax(r)
+        return np.amax(np.real(r))
 
 
 class twoside_chi2(object):
@@ -370,7 +371,7 @@ class twoside_chi2(object):
 
         """
 
-        return self.isf(val)
+        return self.isf(val).squeeze()
 
     def __getstate__(self):
         return dict(par=self.par1, par2=self.par2,

@@ -1458,7 +1458,7 @@ class PointSourceLLH(object):
                     print(fit)
 
                 # use fitted function to calculate needed TS-value
-                TSval_i = fit(alpha_i)
+                TSval_i = float(fit(alpha_i))
 
                 sys.stdout.flush()
 
