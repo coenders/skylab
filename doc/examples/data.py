@@ -57,7 +57,7 @@ def MC(N=1000):
 
     return arr
 
-def init(Nexp, NMC):
+def init(Nexp, NMC, **kwargs):
     arr_exp = exp(Nexp)
     arr_mc = MC(NMC)
 
@@ -65,8 +65,9 @@ def init(Nexp, NMC):
                            sinDec_range=[-1., 1.])
 
     llh = PointSourceLLH(arr_exp, arr_mc, 365., llh_model=llh_model,
-                         mode="all", hemisphere_dec=0.,
-                         rho_nsource_bounds=(-0.8, 0.8))
+                         mode="all", hemispheres=dict(Full=[-np.inf, np.inf]),
+                         rho_nsource_bounds=(-0.8, 0.8),
+                         **kwargs)
 
     return llh
 
