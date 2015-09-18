@@ -464,6 +464,12 @@ class PointSourceInjector(Injector):
 
         """
 
+        if not hasattr(self, "mc_arr") or not hasattr(self, "mc"):
+            raise AttributeError("No MC information, injector filled?")
+
+        assert(len(self.mc_arr) == sum([len(val)
+                                        for val in self.mc.itervalues()]))
+
         # generate event numbers using poissonian events
         while True:
             num = (self.random.poisson(mean_mu)

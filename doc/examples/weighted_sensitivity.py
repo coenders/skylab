@@ -1,6 +1,6 @@
 # -*-coding:utf8-*-
 
-from data import init
+import data
 
 import numpy as np
 
@@ -14,7 +14,8 @@ import matplotlib.pyplot as plt
 if __name__=="__main__":
 
     # init likelihood class
-    llh = init(1000, 10000, ncpu=4)
+    llh = data.init(1000, 1000, ncpu=4)
+    mc = data.MC(100000)
 
     print(llh)
 
@@ -28,11 +29,15 @@ if __name__=="__main__":
     ndec = 1
     nmu = 7
     for dec in np.linspace(-np.pi/2., np.pi/2., ndec + 2)[1:-1]:
-        result = llh.weighted_sensitivity(dec, [0.5, 2.87e-7], [0.9, 0.5],
+        inj.fill(dec, mc)
+        #llh.do_trials(dec, n_iter=10)
+        #continue
+        result = llh.weighted_sensitivity(dec, [0.5, 2.87e-7],
+                                               [0.9, 0.5],
                                           inj,
-                                          fit="exp",
-                                          n_bckg=2500,
-                                          n_iter=500,
+                                          #fit="exp",
+                                          n_bckg=1000,
+                                          n_iter=250,
                                           eps=5.e-2)
 
         mu = np.unique(np.array(np.linspace(0., max(result["mu"]), nmu),

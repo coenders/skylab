@@ -27,11 +27,9 @@ as performed by Neutrino Telescopes like ANTARES or IceCube.
 
 Requirements
 ------------
-    numpy (1.8 or higher needed for coordinate transformations)
-    scipy (Versions earlier than 0.14.0 will produce lots of output)
+    numpy
+    scipy
     healpy
-    pySLALIB (for coordinate transformations)
-    matplotlib 1.3.1 or higher
 
 Contents
 --------

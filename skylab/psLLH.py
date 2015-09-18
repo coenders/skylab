@@ -274,7 +274,6 @@ class PointSourceLLH(object):
 
         # weight Monte Carlo weights by livetime in seconds
         mc["ow"] *= 3600. * 24. * livetime
-        print(mc.dtype.names)
 
         # Experimental data values
         self.livetime = livetime
@@ -417,14 +416,16 @@ class PointSourceLLH(object):
             ev = ev[mask]
 
         if inject is not None:
+            '''
             # how many events are randomly inside of the selection
             m = (self.random.poisson(float(len(inject)) * dPhi / (2.*np.pi))
                     if self.mode == "box" else len(inject))
-            ind = np.random.choice(len(ev), size=min(m, len(ev)),
-                                   replace=False)
+            ind = self.random.choice(len(ev), size=min(m, len(ev)),
+                                     replace=False)
 
             ev = ev[np.arange(len(ev))[np.in1d(np.arange(len(ev)), ind,
                                                invert=True)]]
+            '''
 
             ev = np.append(ev, numpy.lib.recfunctions.append_fields(
                                         inject, ["B", "S"],
@@ -941,16 +942,19 @@ class PointSourceLLH(object):
         samples = [sam[1] for sam in samples]
 
         if self.ncpu > 1 and len(samples) > self.ncpu:
-            pool = multiprocessing.Pool(self.ncpu)
-
-            args = [(self, np.pi, src_dec, sam, True, kwargs)
+            args = [(self, np.pi, src_dec, sam, True,
+                     dict(kwargs.items()
+                          + [("seed", self.random.randint(2**32))]))
                     for sam in samples]
+
+            pool = multiprocessing.Pool(self.ncpu)
 
             result = pool.map(fs, args, len(args) // self.ncpu + 1)
 
             pool.close()
             pool.join()
             del pool
+
         else:
             result = [self.fit_source(np.pi, src_dec,
                                       inject=sam, scramble=True, **kwargs)
@@ -1268,14 +1272,23 @@ class PointSourceLLH(object):
             print()
 
             if (len(trials) < 1 or (not np.any(trials["n_inj"] > 0))
-                    or (not np.any(trials["TS"][trials["n_inj"] > 0] > TSval))):
+                    or (not np.any(trials["TS"][trials["n_inj"] > 0]
+                                   > 2. * TSval))):
                 # if no events have been injected, do quick estimation
                 # of active region by doing a few trials
 
-                print("Quick estimate of active region, " +
-                      "inject increasing number of events ...")
+                # start with first number of trials that was never thrown
+                if len(trials) < 1:
+                    n_inj = 0
+                else:
+                    n_inj = np.bincount(trials["n_inj"])
+                    n_inj = (len(n_inj) if np.all(n_inj > 0)
+                                        else np.where(n_inj < 1)[0])
 
-                n_inj = int(np.median(trials["n_inj"])) if len(trials) > 0 else 0
+                print("Quick estimate of active region, " +
+                      "inject increasing number of events starting with " +
+                      "{0:d} events".format(n_inj + 1))
+
                 while True:
                     n_inj, sample = inj.sample(n_inj + 1, poisson=False).next()
                     TS_i, xmin_i = self.fit_source(np.pi, src_dec,
@@ -1312,7 +1325,8 @@ class PointSourceLLH(object):
                         up_p = float(np.count_nonzero(resid > 1)) / len(resid)
 
                         if up_p > beta:
-                            mu_eff = np.median(xmean[(xmean > 0)&(resid > 0)])
+                            m = (xmean > 0)&(resid > 0)
+                            mu_eff = np.average(xmean[m], weights=1./resid[m]**2)
 
                             break
 
@@ -2008,6 +2022,10 @@ class MultiPointSourceLLH(PointSourceLLH):
 
 def fs(args):
     llh, ra, dec, inject, scramble, kwargs = args
+    if scramble:
+        if not kwargs.has_key("seed"):
+            raise KeyError("Need seed for multiprocessing scrambling")
+        llh.seed = kwargs.pop("seed")
     return llh.fit_source(ra, dec, inject=inject, scramble=scramble,
                           **kwargs)
 

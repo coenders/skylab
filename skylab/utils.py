@@ -180,13 +180,13 @@ class delta_chi2(object):
 
         """
 
-        return self.isf(val).squeeze()
+        return self.isf(val)
 
     def __getstate__(self):
         return dict(par=self.par, eta=self.eta, eta_err=self.eta_err,
                     ks=self.ks)
 
-    def __setstate(self, state):
+    def __setstate__(self, state):
         for key, val in state.iteritems():
             setattr(self, key, val)
 
@@ -280,7 +280,7 @@ class delta_exp(object):
 
         """
 
-        return self.isf(val).squeeze()
+        return self.isf(val)
 
     def __getstate__(self):
         return dict(eta=self.eta, eta_err=self.eta_err, p=self.p, deg=self.deg)
@@ -380,7 +380,7 @@ class twoside_chi2(object):
 
         """
 
-        return self.isf(val).squeeze()
+        return self.isf(val)
 
     def __getstate__(self):
         return dict(par=self.par1, par2=self.par2,

@@ -88,12 +88,12 @@ def multi_init(n, Nexp, NMC, **kwargs):
     seed = kwargs.pop("seed", 0)
     llh = MultiPointSourceLLH(seed=seed, **kwargs)
 
-    seed += 1
+    P = np.random.RandomState(seed)
 
     for i in range(n):
-        llh.add_sample("S{0:02d}".format(i), init(np.random.poisson(Nexp // n),
+        llh.add_sample("S{0:02d}".format(i), init(P.poisson(Nexp // n),
                                                   NMC, energy=energy,
-                                                  seed=seed + i))
+                                                  seed=seed + i + 1))
 
     return llh
 

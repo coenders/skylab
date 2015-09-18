@@ -123,13 +123,6 @@ class NullModel(object):
         """
         self.__raise__()
 
-    def reset(self, *args, **kwargs):
-        r"""Resetting the llh-model to delete possible cached values
-
-        """
-
-        self.__raise__()
-
     def weight(self, *args, **kwargs):
         r"""Additional weights calculated for each event, commonly used to
         implement energy weights in the point source likelihood.
@@ -251,13 +244,6 @@ class ClassicLLH(NullModel):
         """
         return 1. / 2. / np.pi * np.exp(self.bckg_spline(ev["sinDec"]))
 
-    def reset(self):
-        r"""Classic likelihood does only depend on spatial part, needs no
-        caching
-
-        """
-        return
-
     def signal(self, src_ra, src_dec, ev):
         r"""Spatial distance between source position and events
 
@@ -300,8 +286,6 @@ class WeightLLH(ClassicLLH):
     Abstract class, not incorporating a weighting scheme for Monte Carlo.
 
     """
-
-    _mc = None
 
     _precision = _precision
 
@@ -377,18 +361,14 @@ class WeightLLH(ClassicLLH):
         return
 
     def __call__(self, exp, mc):
-        r"""In addition to *classicLLH.__call__(),
-        splines for energy-declination are created as well.
+        r"""In addition to ClassicLLH.__call__(), create weight-splines.
 
         """
 
         # create spatial splines of classic LLH class
         super(WeightLLH, self).__call__(exp, mc)
 
-        # store monte carlo events for calculation of background weights
-        self._mc = mc
-
-        self._setup(exp)
+        self._setup(exp, mc)
 
         return
 
@@ -448,7 +428,7 @@ class WeightLLH(ClassicLLH):
 
         """
 
-        raise NotImplementedError("Weigthing not specified, using subclass")
+        raise NotImplementedError("Weigthing not specified, use subclass")
 
     def _hist(self, arr, weights=None):
         r"""Create histogram of data so that it is correctly normalized.
@@ -470,7 +450,7 @@ class WeightLLH(ClassicLLH):
 
         return h, binedges
 
-    def _ratio_spline(self, **params):
+    def _ratio_spline(self, mc, **params):
         r"""Create the ratio of signal over background probabilities. With same
         binning, the bin hypervolume cancels out, ensuring correct
         normalisation of the histograms.
@@ -487,16 +467,11 @@ class WeightLLH(ClassicLLH):
 
         """
 
-        # use previous calculations if existing
-        if self._w_spline_dict.has_key(tuple(params.items())):
-            return self._w_spline_dict[tuple(params.items())]
-
-        mcvars = [self._mc[p] if not p == "sinDec"
-                              else np.sin(self._mc["trueDec"])
+        mcvars = [mc[p] if not p == "sinDec" else np.sin(mc["trueDec"])
                   for p in self.hist_pars]
 
         # create MC histogram
-        wSh, wSb = self._hist(mcvars, weights=self._get_weights(**params))
+        wSh, wSb = self._hist(mcvars, weights=self._get_weights(mc, **params))
         wSh = kernel_func(wSh, self._XX)
         wSd = wSh > 0.
 
@@ -525,11 +500,11 @@ class WeightLLH(ClassicLLH):
 
         return spline
 
-    def _setup(self, exp):
+    def _setup(self, exp, mc):
         r"""Set up everything for weight calculation.
 
         """
-        # set up weights for background distribution, reset all cached values
+        # set up weights for background distribution
         self._w_spline_dict = dict()
 
         expvars = [exp[p] for p in self.hist_pars]
@@ -543,7 +518,8 @@ class WeightLLH(ClassicLLH):
         self._ndim_range = tuple([(wB_i[0], wB_i[-1])
                                   for wB_i in self._wB_bins])
 
-        par_vals = [np.arange(par[1][0], par[1][1] + self._precision,
+        par_vals = [np.arange(par[1][0] - self._precision,
+                              par[1][1] + 2 * self._precision,
                               self._precision)
                     for par in self.params.itervalues()]
 
@@ -553,7 +529,7 @@ class WeightLLH(ClassicLLH):
             params = dict([(key, self._around(tup_i))
                            for key, tup_i in zip(self.params.iterkeys(), tup)])
 
-            self._ratio_spline(**params)
+            self._ratio_spline(mc, **params)
 
         return
 
@@ -562,14 +538,6 @@ class WeightLLH(ClassicLLH):
 
         """
         return spline(np.vstack([ev[p] for p in self.hist_pars]).T)
-
-    def reset(self):
-        r"""Energy weights are cached, reset all cached values.
-
-        """
-        self._w_cache = _parab_cache
-
-        return
 
     def weight(self, *args, **kwargs):
         r"""Not implemented here, need to know the parameters.
@@ -599,7 +567,7 @@ class PowerLawLLH(WeightLLH):
 
         return
 
-    def _get_weights(self, **params):
+    def _get_weights(self, mc, **params):
         r"""Calculate weights using the given parameters.
 
         Parameters
@@ -614,7 +582,7 @@ class PowerLawLLH(WeightLLH):
 
         """
 
-        return self._mc["ow"] * self._mc["trueE"]**(-params["gamma"])
+        return mc["ow"] * mc["trueE"]**(-params["gamma"])
 
     def weight(self, ev, **params):
         r"""Evaluate spline for given gamma.
@@ -647,9 +615,9 @@ class PowerLawLLH(WeightLLH):
         g0 = g1 - dg
         g2 = g1 + dg
 
-        S0 = self._spline_eval(self._ratio_spline(gamma=g0), ev)
-        S1 = self._spline_eval(self._ratio_spline(gamma=g1), ev)
-        S2 = self._spline_eval(self._ratio_spline(gamma=g2), ev)
+        S0 = self._spline_eval(self._w_spline_dict[dict(gamma=g0)], ev)
+        S1 = self._spline_eval(self._w_spline_dict[dict(gamma=g1)], ev)
+        S2 = self._spline_eval(self._w_spline_dict[dict(gamma=g2)], ev)
 
         a = (S0 - 2.*S1 + S2) / (2. * dg**2)
         b = (S2 - S0) / (2. * dg)
