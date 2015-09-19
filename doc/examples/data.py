@@ -14,7 +14,7 @@ import numpy as np
 
 # skylab
 from skylab.psLLH import PointSourceLLH
-from skylab.ps_model import ClassicLLH
+from skylab.ps_model import ClassicLLH, EnergyLLH
 
 log_mean = np.log(np.radians(3.))
 log_sig = np.log(1.5)
@@ -57,12 +57,22 @@ def MC(N=1000):
 
     return arr
 
-def init(Nexp, NMC, **kwargs):
+def init(Nexp, NMC, energy=False, **kwargs):
     arr_exp = exp(Nexp)
     arr_mc = MC(NMC)
 
-    llh_model = ClassicLLH(sinDec_bins=max(2, Nexp // 10),
-                           sinDec_range=[-1., 1.])
+    if energy:
+        llh_model = EnergyLLH(sinDec_bins=max(2, Nexp // 10),
+                              sinDec_range=[-1., 1.],
+                              twodim_bins=max(3, Nexp // 100),
+                              twodim_range=[[0.9 * min(arr_exp["logE"].min(),
+                                                       arr_mc["logE"].min()),
+                                             1.1 * max(arr_exp["logE"].max(),
+                                                       arr_exp["logE"].max())],
+                                             [-1., 1.]])
+    else:
+        llh_model = ClassicLLH(sinDec_bins=max(2, Nexp // 10),
+                               sinDec_range=[-1., 1.])
 
     llh = PointSourceLLH(arr_exp, arr_mc, 365., llh_model=llh_model,
                          mode="all", hemispheres=dict(Full=[-np.inf, np.inf]),

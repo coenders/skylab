@@ -12,7 +12,7 @@ from skylab.ps_injector import PointSourceInjector
 if __name__=="__main__":
 
     # init likelihood class
-    llh = init(10000, 1000000, ncpu=4)
+    llh = init(10000, 1000000, ncpu=1, energy=True)
 
     print(llh)
 
