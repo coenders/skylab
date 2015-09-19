@@ -165,6 +165,18 @@ class delta_chi2(object):
 
         return
 
+    def __getstate__(self):
+        return dict(par=self.par, eta=self.eta, eta_err=self.eta_err,
+                    ks=self.ks)
+
+    def __setstate__(self, state):
+        for key, val in state.iteritems():
+            setattr(self, key, val)
+
+        self.f = chi2(*self.par)
+
+        return
+
     def __str__(self):
         return ("Delta Distribution plus chi-square {0:s}\n".format(
                     self.__repr__())
@@ -249,6 +261,19 @@ class twoside_chi2(object):
         # get fit-quality
         self.ks1 = kstest(data[data > 0.], "chi2", args=self.par1)[1]
         self.ks2 = kstest(-data[data < 0.], "chi2", args=self.par2)[1]
+
+        return
+
+    def __getstate__(self):
+        return dict(par1=self.par1, par2=self.par2, eta=self.eta,
+                    eta_err=self.eta_err, ks1=self.ks1, ks2=self.ks2)
+
+    def __setstate__(self, state):
+        for key, val in state.iteritems():
+            setattr(self, key, val)
+
+        self.f1 = chi2(*self.par1)
+        self.f2 = chi2(*self.par2)
 
         return
 
