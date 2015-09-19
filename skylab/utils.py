@@ -26,7 +26,19 @@ Helper methods for the other classes
 
 import healpy as hp
 import numpy as np
+from scipy.signal import convolve
 from scipy.stats import chi2, kstest, poisson
+
+
+def kernel_func(X, Y):
+    r"""Smooth histogram Y with kernel Y
+
+    """
+    if Y is None:
+        return X
+
+    return (convolve(X, Y, mode="same")
+            / convolve(np.ones_like(X), Y, mode="same"))
 
 
 def poisson_percentile(mu, x, y, yval):

@@ -28,10 +28,10 @@ import healpy as hp
 import numpy as np
 import scipy.interpolate
 from scipy.stats import norm
-from scipy.signal import convolve
 
 # local package imports
 from . import set_pars
+from .utils import kernel_func
 
 # get module logger
 def trace(self, message, *args, **kwargs):
@@ -60,7 +60,7 @@ _2dim_bins = 25
 _ratio_perc = 99.
 _1dim_order = 2
 _2dim_order = 2
-_gamma_precision = 0.1
+_precision = 0.1
 _par_val = np.nan
 _parab_cache = np.zeros((0, ), dtype=[("S1", np.float), ("a", np.float),
                                       ("b", np.float)])
@@ -299,7 +299,7 @@ class WeightLLH(ClassicLLH):
 
     _mc = None
 
-    _precision = _gamma_precision
+    _precision = _precision
 
     _g1 = _par_val
     _w_cache = _parab_cache
@@ -344,25 +344,21 @@ class WeightLLH(ClassicLLH):
         kernel = kwargs.pop("kernel", 0)
         if np.all(np.asarray(kernel) == 0):
             # No smoothing
-            self._kernel_func = lambda X: X
+            self._XX = None
         elif isinstance(kernel, (list, np.ndarray)):
             kernel_arr = np.asarray(kernel)
             assert(np.all(kernel_arr >= 0))
             XX = np.meshgrid(*([kernel_arr for i in range(len(self.hist_pars)
                                                           - self._ndim_norm)]
                               + [[1] for i in range(self._ndim_norm)]))
-            XX = np.product(XX, axis=0).T
-            self._kernel_func = (lambda X: convolve(X, XX, mode="same")
-                                            / convolve(np.ones_like(X), XX, mode="same"))
+            self._XX = np.product(XX, axis=0).T
         elif isinstance(kernel, int):
             assert(kernel > 0)
             kernel_arr = np.ones(2 * kernel + 1, dtype=np.float)
             XX = np.meshgrid(*([kernel_arr for i in range(len(self.hist_pars)
                                                           - self._ndim_norm)]
                               + [[1] for i in range(self._ndim_norm)]))
-            XX = np.product(XX, axis=0).T
-            self._kernel_func = (lambda X: convolve(X, XX, mode="same")
-                                            / convolve(np.ones_like(X), XX, mode="same"))
+            self._XX = np.product(XX, axis=0).T
         elif isinstance(kernel, float):
             assert(kernel >= 1)
             val = 1.6635
@@ -371,9 +367,7 @@ class WeightLLH(ClassicLLH):
             XX = np.meshgrid(*([kernel_arr for i in range(len(self.hist_pars)
                                                           - self._ndim_norm)]
                               + [[1] for i in range(self._ndim_norm)]))
-            XX = np.product(XX, axis=0).T
-            self._kernel_func = (lambda X: convolve(X, XX, mode="same")
-                                            / convolve(np.ones_like(X), XX, mode="same"))
+            self._XX = np.product(XX, axis=0).T
         else:
             raise ValueError("Kernel has to be positive int / float or array")
 
@@ -504,7 +498,7 @@ class WeightLLH(ClassicLLH):
 
         # create MC histogram
         wSh, wSb = self._hist(mcvars, weights=self._get_weights(**params))
-        wSh = self._kernel_func(wSh)
+        wSh = kernel_func(wSh, self._XX)
         wSd = wSh > 0.
 
         # calculate ratio
@@ -542,7 +536,7 @@ class WeightLLH(ClassicLLH):
         expvars = [exp[p] for p in self.hist_pars]
 
         self._wB_hist, self._wB_bins = self._hist(expvars)
-        self._wB_hist = self._kernel_func(self._wB_hist)
+        self._wB_hist = kernel_func(self._wB_hist, self._XX)
         self._wB_domain = self._wB_hist > 0
 
         # overwrite bins
