@@ -695,7 +695,7 @@ class PointSourceLLH(object):
             Other keyword arguments are passed to the source fitting
             """
 
-            if self.ncpu > 1 and len(args) > self.ncpu:
+            if self.ncpu > 1 and np.count_nonzero(mask) > self.ncpu:
                 # create args: different positions, no injection and no
                 # scrambling for all-sky scan
                 args = [(self, ra_i, dec_i, None, False,
@@ -704,7 +704,7 @@ class PointSourceLLH(object):
                         for ra_i, dec_i, xmin_i in zip(ra[mask], dec[mask],
                                                        xmins[mask])]
                 pool = multiprocessing.Pool(self.ncpu)
-                result = pool.map(multi_fs, args, len(args) // self.ncpu + 1)
+                result = pool.map(fs, args, len(args) // self.ncpu + 1)
 
                 pool.close()
                 pool.join()
@@ -924,8 +924,6 @@ class PointSourceLLH(object):
             Other keyword arguments are passed to the source fitting.
 
         """
-        start  = time.time()
-
         mu_gen = kwargs.pop("mu", repeat((0, None)))
 
         # values for iteration procedure
@@ -1507,8 +1505,8 @@ class PointSourceLLH(object):
             sys.stdout.flush()
 
         # add weights
-        w = np.vstack([utils.poisson_weight(trials["n_inj"], mu_i)
-                       for mu_i in mu_flux])
+        w = np.vstack([utils.poisson_weight(trials["n_inj"], mu_flux_i)
+                       for mu_flux_i in mu_flux])
 
         result = dict(flux=flux, mu=mu_flux, TSval=TS, alpha=alpha, beta=beta,
                       fit=fit, trials=trials, weights=w)

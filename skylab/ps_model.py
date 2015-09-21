@@ -24,7 +24,6 @@ from copy import deepcopy
 import logging
 
 # scipy-project imports
-import healpy as hp
 import numpy as np
 import scipy.interpolate
 from scipy.stats import norm
