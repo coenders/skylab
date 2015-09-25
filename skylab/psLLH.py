@@ -333,8 +333,12 @@ class PointSourceLLH(object):
                          np.amin(self.mc["logE"]), np.amax(self.mc["logE"]))
 
         # Selection
-        sout += (67*"-"+"\n"
-                 "Selected Events      : {0:7d}\n".format(self._n))
+        if self.mode == "all":
+            sout += 67*"-"+"\nUsing all events\n"
+        else:
+            sout += (67*"-"+"\n"
+                     "Selected Events - {0:8s}: {1:7d}\n".format(self.mode,
+                                                                 self._n))
 
         # LLH information
         sout += 67*"-"+"\n"
@@ -695,7 +699,7 @@ class PointSourceLLH(object):
             Other keyword arguments are passed to the source fitting
             """
 
-            if self.ncpu > 1 and len(args) > self.ncpu:
+            if self.ncpu > 1 and np.count_nonzero(mask) > self.ncpu:
                 # create args: different positions, no injection and no
                 # scrambling for all-sky scan
                 args = [(self, ra_i, dec_i, None, False,
@@ -1303,7 +1307,7 @@ class PointSourceLLH(object):
                 else:
                     n_inj = np.bincount(trials["n_inj"])
                     n_inj = (len(n_inj) if np.all(n_inj > 0)
-                                        else np.where(n_inj < 1)[0])
+                                        else np.where(n_inj < 1)[0][0])
 
                 print("Quick estimate of active region, "
                       "inject increasing number of events "
