@@ -1112,6 +1112,16 @@ class PointSourceLLH(object):
                                 bounds=self.par_bounds,
                                 **kwargs)
 
+        if fmin > 0 and (self.par_bounds[0][0] <= 0
+                         and self.par_bounds[0][1] >= 0):
+            # null hypothesis is part of minimisation, fit should be negative
+            if abs(fmin) > kwargs["pgtol"]:
+                # SPAM only if the distance is large
+                logger.error("Fitter returned positive value "
+                             "force to be zero.")
+            fmin = 0
+            xmin[0] = 0.
+
         if abs(xmin[0]) > _rho_max * self._n:
             logger.error(("nsources > {0:7.2%} * {1:6d} selected events, "
                           "fit-value nsources = {2:8.1f}").format(
