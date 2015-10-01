@@ -708,7 +708,7 @@ class PointSourceLLH(object):
                         for ra_i, dec_i, xmin_i in zip(ra[mask], dec[mask],
                                                        xmins[mask])]
                 pool = multiprocessing.Pool(self.ncpu)
-                result = pool.map(multi_fs, args, len(args) // self.ncpu + 1)
+                result = pool.map(fs, args)#, len(args) // self.ncpu + 1)
 
                 pool.close()
                 pool.join()
@@ -928,8 +928,6 @@ class PointSourceLLH(object):
             Other keyword arguments are passed to the source fitting.
 
         """
-        start  = time.time()
-
         mu_gen = kwargs.pop("mu", repeat((0, None)))
 
         # values for iteration procedure
@@ -1117,6 +1115,16 @@ class PointSourceLLH(object):
                                 _llh, pars,
                                 bounds=self.par_bounds,
                                 **kwargs)
+
+        if fmin > 0 and (self.par_bounds[0][0] <= 0
+                         and self.par_bounds[0][1] >= 0):
+            # null hypothesis is part of minimisation, fit should be negative
+            if abs(fmin) > kwargs["pgtol"]:
+                # SPAM only if the distance is large
+                logger.error("Fitter returned positive value "
+                             "force to be zero.")
+            fmin = 0
+            xmin[0] = 0.
 
         if abs(xmin[0]) > _rho_max * self._n:
             logger.error(("nsources > {0:7.2%} * {1:6d} selected events, "
@@ -1511,8 +1519,8 @@ class PointSourceLLH(object):
             sys.stdout.flush()
 
         # add weights
-        w = np.vstack([utils.poisson_weight(trials["n_inj"], mu_i)
-                       for mu_i in mu_flux])
+        w = np.vstack([utils.poisson_weight(trials["n_inj"], mu_flux_i)
+                       for mu_flux_i in mu_flux])
 
         result = dict(flux=flux, mu=mu_flux, TSval=TS, alpha=alpha, beta=beta,
                       fit=fit, trials=trials, weights=w)

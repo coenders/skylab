@@ -24,7 +24,6 @@ from copy import deepcopy
 import logging
 
 # scipy-project imports
-import healpy as hp
 import numpy as np
 import scipy.interpolate
 from scipy.stats import norm
@@ -594,8 +593,8 @@ class WeightLLH(ClassicLLH):
             b = self._w_cache["b"]
         else:
             # evaluate neighbouring gridpoints and parametrize a parabola
-            g0 = g1 - dg
-            g2 = g1 + dg
+            g0 = self._around(g1 - dg)
+            g2 = self._around(g1 + dg)
 
             S0 = self._spline_eval(self._ratio_spline(gamma=g0), ev)
             S1 = self._spline_eval(self._ratio_spline(gamma=g1), ev)

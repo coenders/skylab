@@ -24,7 +24,6 @@ Helper methods for the other classes
 
 """
 
-import healpy as hp
 import numpy as np
 from scipy.signal import convolve
 from scipy.stats import chi2, kstest, poisson
@@ -82,7 +81,7 @@ def poisson_percentile(mu, x, y, yval):
     return u / np.sum(w, dtype=np.float), err
 
 
-def poisson_weight(vals, mean):
+def poisson_weight(vals, mean, weights=None):
     r"""Calculate weights for a sample that it resembles a poissonian.
 
     Parameters
@@ -98,13 +97,21 @@ def poisson_weight(vals, mean):
     weights : array-like
         Weights for each event
 
+    Optional Parameters
+    --------------------
+    weights : array-like
+        Weights for each event before poissonian
+
     """
 
     mean = float(mean)
     vals = np.asarray(vals, dtype=np.int)
 
+    if weights is None:
+        weights = np.ones_like(vals, dtype=np.float)
+
     # get occurences of integers
-    bincount = np.bincount(vals)
+    bincount = np.bincount(vals, weights=weights)
 
     n_max = len(bincount)
 
@@ -122,7 +129,7 @@ def poisson_weight(vals, mean):
 
     w = w[np.searchsorted(np.arange(n_max), vals)]
 
-    return w
+    return w * weights
 
 
 class delta_chi2(object):
@@ -223,6 +230,72 @@ class delta_chi2(object):
         """ Inverse survival function.
         """
         return np.where(x < self.eta, self.f.isf(x/self.eta), 0.)
+
+
+class delta_exp(object):
+    r"""Class that approximates the test statistic using a gaussian tail.
+
+    """
+    def __init__(self, data, **kwargs):
+        r"""Constructor. The data above zero is fitted with a gaussian tail.
+
+        """
+        data = np.asarray(data)
+
+        self.deg = kwargs.pop("deg")
+
+        # amount of overfluctuations
+        self.eta = float(np.count_nonzero(data > 0)) / len(data)
+        self_eta_err = np.sqrt(self.eta * (1. - self.eta) / len(data))
+
+        # sort data and construct cumulative distribution
+        x = np.sort(data[data > 0])
+        y = np.linspace(1., 0., len(x) + 1)[:-1]
+
+        self.p = np.polyfit(x, np.log(y), self.deg)
+
+        return
+
+    def __getstate__(self):
+        return dict(eta=self.eta, eta_err=self.eta_err, p=self.p, deg=self.deg)
+
+    def __setstate__(self, state):
+        self.eta = state.pop("eta")
+        self.eta_err = state.pop("eta_err")
+        self.p = state.pop("p")
+        self.deg = state.pop("deg")
+
+        return
+
+    def pdf(self, val):
+        r"""Probability densitiy function
+
+        """
+        return np.where(val > 0, np.polyval(np.polyder(self.p), val)
+                                    * np.exp(np.polyval(self.p, val)),
+                        self.eta)
+
+    def sf(self, val):
+        r"""Survival function
+
+        """
+        return np.where(val > 0, np.exp(np.polyval(self.p, val)), self.eta)
+
+    def isf(self, val):
+        r"""Inverse survival function
+
+        """
+        if val > self.eta:
+            return 0.
+
+        p = np.copy(self.p)
+        p[-1] -= np.log(val)
+
+        r = np.roots(p)
+        r = np.real(r[np.isreal(r)])
+        r = r[r > 0]
+
+        return np.amax(r)
 
 
 class twoside_chi2(object):
@@ -364,7 +437,6 @@ def rotate(ra1, dec1, ra2, dec2, ra3, dec3):
     assert(len(ra1) == len(dec1)
                 == len(ra2) == len(dec2)
                 == len(ra3) == len(dec3))
-    N = len(ra1)
 
     alpha = np.arccos(np.cos(ra2 - ra1) * np.cos(dec1) * np.cos(dec2)
                       + np.sin(dec1) * np.sin(dec2))
