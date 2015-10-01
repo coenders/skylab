@@ -81,7 +81,7 @@ def poisson_percentile(mu, x, y, yval):
     return u / np.sum(w, dtype=np.float), err
 
 
-def poisson_weight(vals, mean):
+def poisson_weight(vals, mean, weights=None):
     r"""Calculate weights for a sample that it resembles a poissonian.
 
     Parameters
@@ -97,13 +97,21 @@ def poisson_weight(vals, mean):
     weights : array-like
         Weights for each event
 
+    Optional Parameters
+    --------------------
+    weights : array-like
+        Weights for each event before poissonian
+
     """
 
     mean = float(mean)
     vals = np.asarray(vals, dtype=np.int)
 
+    if weights is None:
+        weights = np.ones_like(vals, dtype=np.float)
+
     # get occurences of integers
-    bincount = np.bincount(vals)
+    bincount = np.bincount(vals, weights=weights)
 
     n_max = len(bincount)
 
@@ -121,7 +129,7 @@ def poisson_weight(vals, mean):
 
     w = w[np.searchsorted(np.arange(n_max), vals)]
 
-    return w
+    return w * weights
 
 
 class delta_chi2(object):

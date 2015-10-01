@@ -704,7 +704,7 @@ class PointSourceLLH(object):
                         for ra_i, dec_i, xmin_i in zip(ra[mask], dec[mask],
                                                        xmins[mask])]
                 pool = multiprocessing.Pool(self.ncpu)
-                result = pool.map(fs, args, len(args) // self.ncpu + 1)
+                result = pool.map(fs, args)#, len(args) // self.ncpu + 1)
 
                 pool.close()
                 pool.join()
