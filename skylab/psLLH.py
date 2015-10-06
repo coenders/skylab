@@ -776,6 +776,14 @@ class PointSourceLLH(object):
                                                 for par, val in xmin.iteritems()],
                                             TS=fmin, pVal=pV))
 
+                # check whether refit was successful
+                if result[hem]["grid"]["pVal"] > result[hem]["fit"]["pVal"]:
+                    best = "grid"
+                else:
+                    best = "fit"
+
+                result[hem]["best"] = result[hem][best]
+
                 sys.stdout.flush()
 
             return result
