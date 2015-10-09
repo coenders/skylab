@@ -384,8 +384,10 @@ class PointSourceInjector(Injector):
                           &(mc_i["trueE"] / self.GeV < self.e_range[1]))
 
             if not np.any(band_mask):
-                emsg = "Sample {0:d}: No events were selected!".format(key)
-                raise ValueError(emsg)
+                print("Sample {0:d}: No events were selected!".format(key))
+                self.mc[key] = mc_i[band_mask]
+
+                continue
 
             self.mc[key] = mc_i[band_mask]
 
@@ -400,6 +402,11 @@ class PointSourceInjector(Injector):
 
             print("Sample {0:s}: Selected {1:6d} events at {2:7.2f}deg".format(
                         str(key), N, np.degrees(self.src_dec)))
+
+        if len(self.mc_arr) < 1:
+            raise ValueError("Select no events at all")
+
+        print("Selected {0:d} events in total".format(len(self.mc_arr)))
 
         self._weights()
 
