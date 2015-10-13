@@ -13,7 +13,7 @@ from __future__ import print_function
 import numpy as np
 
 # skylab
-from skylab.psLLH import PointSourceLLH
+from skylab.psLLH import PointSourceLLH, MultiPointSourceLLH
 from skylab.ps_model import ClassicLLH, EnergyLLH
 
 log_mean = np.log(np.radians(3.))
@@ -77,7 +77,20 @@ def init(Nexp, NMC, energy=False, **kwargs):
     llh = PointSourceLLH(arr_exp, arr_mc, 365., llh_model=llh_model,
                          mode="all", hemispheres=dict(Full=[-np.inf, np.inf]),
                          rho_nsource_bounds=(-0.8, 0.8),
+                         seed=np.random.randint(2**32),
                          **kwargs)
 
     return llh
+
+def multi_init(n, Nexp, NMC, **kwargs):
+    llh = MultiPointSourceLLH(hemispheres=dict(Full=[-np.inf, np.inf]),
+                              rho_nsource_bounds=(-0.8, 0.8),
+                              seed=np.random.randint(2**32),
+                              **kwargs)
+
+    for i in xrange(n):
+        llh.add_sample(str(i), init(Nexp, NMC, **kwargs))
+
+    return llh
+
 
