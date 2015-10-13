@@ -333,8 +333,12 @@ class PointSourceLLH(object):
                          np.amin(self.mc["logE"]), np.amax(self.mc["logE"]))
 
         # Selection
-        sout += (67*"-"+"\n"
-                 "Selected Events      : {0:7d}\n".format(self._n))
+        if self.mode == "all":
+            sout += 67*"-"+"\nUsing all events\n"
+        else:
+            sout += (67*"-"+"\n"
+                     "Selected Events - {0:8s}: {1:7d}\n".format(self.mode,
+                                                                 self._n))
 
         # LLH information
         sout += 67*"-"+"\n"
