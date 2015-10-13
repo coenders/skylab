@@ -1319,11 +1319,11 @@ class PointSourceLLH(object):
                 else:
                     n_inj = np.bincount(trials["n_inj"])
                     n_inj = (len(n_inj) if np.all(n_inj > 0)
-                                        else np.where(n_inj < 1)[0])
+                                        else np.where(n_inj < 1)[0][0])
 
                 print("Quick estimate of active region, "
                       "inject increasing number of events "
-                      "starting with {0:d} events...".format(n_inj))
+                      "starting with {0:d} events...".format(n_inj + 1))
 
                 n_inj = int(np.mean(trials["n_inj"])) if len(trials) > 0 else 0
                 while True:
@@ -1347,7 +1347,8 @@ class PointSourceLLH(object):
 
                     resid = mTS - TSval
 
-                    if float(np.count_nonzero(resid > 0)) / len(resid) > beta:
+                    if (float(np.count_nonzero(resid > 0)) / len(resid) > beta
+                        or np.all(resid > 0)):
                         mu_eff = len(mTS) * beta
 
                         break
