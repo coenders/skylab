@@ -14,13 +14,14 @@ pVal_func = lambda TS, dec: -np.log10(0.5 * (chi2(1).sf(TS) + chi2(1).cdf(-TS)))
 if __name__=="__main__":
 
     # init the llh class
-    llh = data.multi_init(4, 250, 10000, ncpu=4)
+    llh = data.multi_init(4, 1000, 10000, ncpu=4)
 
     print(llh)
 
     # iterator of all-sky scan with follow up scans of most interesting points
-    for i, (scan, hotspot) in enumerate(llh.all_sky_scan(nside=16,
-                                                         pVal=pVal_func)):
+    for i, (scan, hotspot) in enumerate(llh.all_sky_scan(nside=32,
+                                                         pVal=pVal_func,
+                                                         decRange=np.radians([-90., 90.]))):
         if i > 0:
             # break after first follow up
             break

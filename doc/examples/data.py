@@ -16,8 +16,8 @@ import numpy as np
 from skylab.psLLH import PointSourceLLH, MultiPointSourceLLH
 from skylab.ps_model import ClassicLLH, EnergyLLH
 
-log_mean = np.log(np.radians(3.))
-log_sig = np.log(1.5)
+log_mean = np.log(np.radians(2.5))
+log_sig = 0.5
 logE_mean = np.log(1.)
 logE_sig = 1.
 
