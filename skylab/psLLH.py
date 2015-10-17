@@ -708,7 +708,7 @@ class PointSourceLLH(object):
                         for ra_i, dec_i, xmin_i in zip(ra[mask], dec[mask],
                                                        xmins[mask])]
                 pool = multiprocessing.Pool(self.ncpu)
-                result = pool.map(fs, args)#, len(args) // self.ncpu + 1)
+                result = pool.map(fs, args)
 
                 pool.close()
                 pool.join()
@@ -958,7 +958,7 @@ class PointSourceLLH(object):
 
             pool = multiprocessing.Pool(self.ncpu)
 
-            result = pool.map(fs, args, len(args) // self.ncpu + 1)
+            result = pool.map(fs, args)
 
             pool.close()
             pool.join()
@@ -1129,8 +1129,10 @@ class PointSourceLLH(object):
             # null hypothesis is part of minimisation, fit should be negative
             if abs(fmin) > kwargs["pgtol"]:
                 # SPAM only if the distance is large
-                logger.error("Fitter returned positive value "
-                             "force to be zero.")
+                logger.error("Fitter returned positive value, "
+                             "force to be zero at null-hypothesis. "
+                             "Minimum found {0} with fmin {1}".format(
+                                 xmin, fmin))
             fmin = 0
             xmin[0] = 0.
 
