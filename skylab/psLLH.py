@@ -1714,7 +1714,6 @@ class MultiPointSourceLLH(PointSourceLLH):
         self._sams = dict()
         self._nuhist = dict()
         self._nuspline = dict()
-        self.mc = dict()
 
         return
 
@@ -1906,9 +1905,6 @@ class MultiPointSourceLLH(PointSourceLLH):
 
         self._enum[enum] = name
         self._sams[enum] = obj
-
-        # add mc info for injection
-        self.mc[enum] = obj.mc
 
         # create histogram of signal expectation for this sample
         x = np.sin(obj.mc["trueDec"])
