@@ -161,7 +161,7 @@ class PointSourceLLH(object):
     _out_print = _out_print
 
     # LLH model
-    _llh_model = ps_model.ClassicLLH()
+    _llh_model = None
 
     # settings for fitting
     _rho_nsource = _rho_nsource
@@ -207,7 +207,8 @@ class PointSourceLLH(object):
             model. Essential values are `ra`, `sinDec`, `sigma`.
         mc : NumPy structured array
             Monte Carlo data similar to `exp`, with additional Monte Carlo
-            information `trueRa`, `trueDec`, `trueE`, `ow`.
+            information `trueRa`, `trueDec`, `trueE`, `ow`. Used for the
+            creation of weighting splines that need signal information.
         livetime : float
             Livetime of experimental data.
 
@@ -273,19 +274,23 @@ class PointSourceLLH(object):
 
             exp = RS.choice(exp, size=mu)
 
-        for name, val in zip(["exp", "mc"], [exp, mc]):
-            fields = val.dtype.fields.keys()
-            if not "sinDec" in fields:
-                val = numpy.lib.recfunctions.append_fields(
-                        val, "sinDec", np.sin(val["dec"]),
-                        dtypes=np.float, usemask=False)
-            setattr(self, name, val)
+        # store exp data, add sinDec information if not available
+        self.exp = exp
 
-        # weight Monte Carlo weights by livetime in seconds
-        self.mc["ow"] *=  3600. * 24. * livetime
+        if not "sinDec" in self.exp.dtype.fields:
+            self.exp = numpy.lib.recfunctions.append_fields(
+                    self.exp, "sinDec", np.sin(self.exp["dec"]),
+                    dtypes=np.float, usemask=False)
+        if not "sinDec" in mc.dtype.fields:
+            mc = numpy.lib.recfunctions.append_fields(
+                    mc, "sinDec", np.sin(mc["dec"]),
+                    dtypes=np.float, usemask=False)
 
         # Experimental data values
         self.livetime = livetime
+
+        # set llh model
+        self.llh_model = kwargs.pop("llh_model", ps_model.ClassicLLH()), mc
 
         # set all other parameters
         set_pars(self, **kwargs)
@@ -322,15 +327,6 @@ class PointSourceLLH(object):
                          np.degrees(np.arcsin(np.amax(self.exp["sinDec"]))),
                          np.amin(self.exp["logE"]), np.amax(self.exp["logE"]),
                          self.livetime)
-        # Monte Carlo information
-        sout += (67*"-"+"\n"
-                 "Number of MC Events  : {0:7d}\n"
-                 "\tZenith Range       : {1:6.1f} - {2:6.1f} deg\n"
-                 "\tlog10 Energy Range : {3:6.1f} - {4:6.1f}\n").format(
-                         len(self.mc),
-                         np.degrees(np.arcsin(np.amin(self.mc["sinDec"]))),
-                         np.degrees(np.arcsin(np.amax(self.mc["sinDec"]))),
-                         np.amin(self.mc["logE"]), np.amax(self.mc["logE"]))
 
         # Selection
         if self.mode == "all":
@@ -520,14 +516,19 @@ class PointSourceLLH(object):
         return self._llh_model
 
     @llh_model.setter
-    def llh_model(self, val):
+    def llh_model(self, args):
+        if len(args) != 2:
+            raise ValueError("LLH model needs the class and mc-array as input")
+
+        val, mc = args
+
         if not isinstance(val, ps_model.NullModel):
             raise TypeError("LLH model not instance of ps_model.NullModel")
 
         # set likelihood module to variable and fill it with data
         self._llh_model = val
 
-        self._llh_model(self.exp, self.mc)
+        self._llh_model(self.exp, mc)
 
         return
 
