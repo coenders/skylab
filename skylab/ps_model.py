@@ -297,8 +297,6 @@ class WeightLLH(ClassicLLH):
 
     """
 
-    _mc = None
-
     _precision = _precision
 
     _g1 = _par_val
@@ -408,6 +406,9 @@ class WeightLLH(ClassicLLH):
             self._ratio_spline(**dict([(p_i, self._around(t_i))
                                        for p_i, t_i in zip(pars, tup)]))
 
+        # all calculations done, delete monte carlo information
+        del self._mc
+
         return
 
     def __str__(self):
@@ -504,13 +505,6 @@ class WeightLLH(ClassicLLH):
             Spline for parameter values *params*
 
         """
-
-        # use previous calculations if existing
-        if self._w_spline_dict.has_key(tuple(params.items())):
-            return self._w_spline_dict[tuple(params.items())]
-
-        print("Calculate splines for", "\t".join(["{0:10s} - {1:.2f}".format(key, val) for key, val in params.iteritems()]),
-              "Number of splines:", len(self._w_spline_dict))
 
         mcvars = [self._mc[p] if not p == "sinDec"
                               else np.sin(self._mc["trueDec"])
@@ -617,11 +611,11 @@ class WeightLLH(ClassicLLH):
             g0 = self._around(g1 - dg)
             g2 = self._around(g1 + dg)
 
-            S0 = self._spline_eval(self._ratio_spline(gamma=g0), ev)
-            S1 = self._spline_eval(self._ratio_spline(gamma=g1), ev)
-            S2 = self._spline_eval(self._ratio_spline(gamma=g2), ev)
+            S0 = self._spline_eval(self._w_spline_dict[(("gamma", g0), )], ev)
+            S1 = self._spline_eval(self._w_spline_dict[(("gamma", g1), )], ev)
+            S2 = self._spline_eval(self._w_spline_dict[(("gamma", g2), )], ev)
 
-            a = (S0 - 2.*S1 + S2) / (2. * dg**2)
+            a = (S0 - 2. * S1 + S2) / (2. * dg**2)
             b = (S2 - S0) / (2. * dg)
 
             # cache values
