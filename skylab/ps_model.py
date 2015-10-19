@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # python packages
 from copy import deepcopy
+from itertools import product
 import logging
 
 # scipy-project imports
@@ -390,6 +391,23 @@ class WeightLLH(ClassicLLH):
 
         self._setup(exp)
 
+        # calclate splines for all values of splines
+        par_grid = dict()
+        for par, val in self.params.iteritems():
+            # create grid of all values that could come up due to boundaries
+            # use one more grid point below and above for gradient calculation
+            low, high = val[1]
+            grid = np.arange(low - self._precision,
+                             high + 2. * self._precision,
+                             self._precision)
+            par_grid[par] = grid
+
+        pars = par_grid.keys()
+        for tup in product(*par_grid.values()):
+            # call spline function to cache the spline
+            self._ratio_spline(**dict([(p_i, self._around(t_i))
+                                       for p_i, t_i in zip(pars, tup)]))
+
         return
 
     def __str__(self):
@@ -490,6 +508,9 @@ class WeightLLH(ClassicLLH):
         # use previous calculations if existing
         if self._w_spline_dict.has_key(tuple(params.items())):
             return self._w_spline_dict[tuple(params.items())]
+
+        print("Calculate splines for", "\t".join(["{0:10s} - {1:.2f}".format(key, val) for key, val in params.iteritems()]),
+              "Number of splines:", len(self._w_spline_dict))
 
         mcvars = [self._mc[p] if not p == "sinDec"
                               else np.sin(self._mc["trueDec"])
