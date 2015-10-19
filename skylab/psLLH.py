@@ -1249,14 +1249,13 @@ class PointSourceLLH(object):
 
         return
 
-    def weighted_sensitivity(self, src_dec, alpha, beta, inj, **kwargs):
+    def weighted_sensitivity(self, src_dec, alpha, beta, inj, mc, **kwargs):
         """Calculate the point source sensitivity for a given source
         hypothesis using weights.
 
         All trials calculated are used at each step and weighted using the
-        Poissonian probability.
-
-        Credits for this idea goes to Asen Christov of IceCube.
+        Poissonian probability. Credits for this idea goes to Asen Christov of
+        IceCube in Geneva.
 
         Parameters
         ----------
@@ -1268,6 +1267,10 @@ class PointSourceLLH(object):
             Error of second kind
         inj : skylab.BaseInjector instance
             Injection module
+        mc : numpy-recarray
+            Monte Carlo to use for injection. Needs all fields that
+            is stored in experimental data, plus true information that the
+            injector uses: trueRa, trueDec, trueE, ow
 
         Returns
         -------
@@ -1455,7 +1458,7 @@ class PointSourceLLH(object):
                              " same length!")
 
         # setup source injector
-        inj.fill(src_dec, self.mc)
+        inj.fill(src_dec, mc)
 
         print("Estimate Sensitivity for declination {0:5.1f} deg".format(
                 np.degrees(src_dec)))
