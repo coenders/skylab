@@ -1822,18 +1822,16 @@ class MultiPointSourceLLH(PointSourceLLH):
         # we need to minimize over all parameters given by any likelihood model
         # gamma will be always minimised over, it is used in the weighting
         return ["nsources"] + list(set([j for i in self._sams.itervalues()
-                                        for j in i.llh_model.params.keys()]
-                                        + ["gamma"]))
+                                        for j in i.llh_model.params.keys()]))
 
     @property
     def par_bounds(self):
         # get tightest parameter bounds
         par_bounds = [np.array([sam.llh_model.params[par][1]
                                 for sam in self._sams.itervalues()
-                                if par in sam.llh_model.params]
-                                + ([self.gamma_bins[[0, -1]]]
-                                    if par is "gamma" else []))
+                                if par in sam.llh_model.params])
                       for par in self.params[1:]]
+
         par_bounds = [(np.amax(pb[:, 0]), np.amin(pb[:, 1]))
                       for pb in par_bounds]
 
@@ -1847,21 +1845,12 @@ class MultiPointSourceLLH(PointSourceLLH):
         # get median seed for all parameters
         par_seeds = [np.median([sam.llh_model.params[par][0]
                                     for sam in self._sams.itervalues()
-                                    if par in sam.llh_model.params]
-                                    + ([self._gamma_def] if par is "gamma"
-                                                         else []))
+                                    if par in sam.llh_model.params])
                      for par in self.params[1:]]
 
-        # get weighted sum of the events for nsources
-        gamma = (par_seeds[self.params[1:].index("gamma")]
-                    if "gamma" in self.params else self._gamma_def)
+        N = np.sum([sam._n for sam in self._sams.itervalues()])
 
-        ns = sum([self._sams[enum]._n * w
-                  for enum, w in self.powerlaw_weights(
-                        self._src_dec, gamma=gamma).iteritems()])
-        N = ns * self._rho_nsource
-
-        return np.array([N] + par_seeds)
+        return np.array([N * self._rho_nsource] + par_seeds)
 
     @property
     def sindec_bins(self):
@@ -1906,23 +1895,6 @@ class MultiPointSourceLLH(PointSourceLLH):
         self._enum[enum] = name
         self._sams[enum] = obj
 
-        # create histogram of signal expectation for this sample
-        x = np.sin(obj.mc["trueDec"])
-        hist = np.vstack([np.histogram(x, weights=obj.mc["ow"]
-                                                    * obj.mc["trueE"]**(-gm),
-                                       bins=self.sindec_bins)[0]
-                          for gm in self._gamma_binmids])
-        hist = hist.T
-
-        # take the mean of the histogram neighbouring bins
-        nwin = 5
-        filter_window = np.ones((nwin, nwin), dtype=np.float)
-        filter_window /= np.sum(filter_window)
-
-        self._nuhist[enum] = (convolve2d(hist, filter_window, mode="same")
-                              / convolve2d(np.ones_like(hist),
-                                           filter_window, mode="same"))
-
         return
 
     def llh(self, **fit_pars):
@@ -1949,94 +1921,65 @@ class MultiPointSourceLLH(PointSourceLLH):
         src_dec = self._src_dec
         nsources = fit_pars.pop("nsources")
 
-        w = self.powerlaw_weights(src_dec, **fit_pars)
+        # get effective area for point in parameter space plus gradients
 
-        # adjust nsources for all fit parameters
-        nsw = dict([(enum, wj*nsources) for enum, wj in w.iteritems()])
+        w = np.empty(len(self._enum), dtype=np.float)
+        grad_w = np.zeros((len(self._enum), len(self.params) - 1),
+                          dtype=np.float)
 
-        # likelihood evaluation on each sample
-        LLH_eval = dict([(enum, sam.llh(nsources=nsw[enum], **fit_pars))
-                         for enum, sam in self._sams.iteritems()])
+        for i, (enum, sam) in enumerate(self._sams.iteritems()):
+            w[i], dw = sam.llh_model.effA(src_dec, **fit_pars)
 
-        # sum up individual contributions
-        logLambda = np.sum([llh[0] for llh in LLH_eval.itervalues()])
+            if dw is None:
+                continue
+
+            for j, par in enumerate(self.params[1:]):
+                if par not in dw:
+                    continue
+
+                grad_w[i, j] = dw[par]
+
+        # normalize weights to one
+        grad_w /= w.sum()
+        w /= w.sum()
+
+        # normalized sum is bound to one, gradients need to account for
+        # this boundary by cross-talk
+        grad_w -= w[np.newaxis].T * np.sum(grad_w, axis=0)[np.newaxis]
+
+        logLambda = 0.
         logLambda_grad = np.zeros_like(self.params, dtype=np.float)
 
-        # nsources, always first parameter
-        logLambda_grad[0] = np.sum([LLH_eval[enum][-1][0] * w[enum]
-                                    for enum in self._enum.iterkeys()])
+        for k, (enum, sam) in enumerate(self._sams.iteritems()):
 
-        # parameters except nsources
-        for i, par in enumerate(self.params[1:]):
-            if par == "gamma":
-                # weights depend on gamma as only parameter
-                w_grad = self.powerlaw_weights(src_dec, dgamma=1, **fit_pars)
-                logLambda_grad[i + 1] += np.sum([nsources * dwj
-                                                 * LLH_eval[enum][-1][0]
-                                                 for enum, dwj
-                                                 in w_grad.iteritems()])
+            w_j = w[k]
+            dw_j = grad_w[k]
 
-            # loop over all likelihood models to see if they minmize in gamma
-            for enum, sam in self._sams.iteritems():
+            llh, grad_llh = sam.llh(nsources=nsources * w_j, **fit_pars)
+
+            # llh value
+            logLambda += llh
+
+            # llh gradient
+
+            # nsources
+            logLambda_grad[0] += grad_llh[0] * w_j
+
+            # other parameters
+            for i, par in enumerate(self.params[1:]):
+
+                logLambda_grad[i + 1] += grad_llh[0] * nsources * dw_j[i]
+
+                # check if this parameter is part of this samples minimizer
                 if not par in sam.params:
                     continue
 
-                ind = sam.params.index(par)
+                # get index of parameter
+                idx = sam.params.index(par)
 
-                logLambda_grad[i + 1] += LLH_eval[enum][-1][ind]
+                logLambda_grad[i + 1] += grad_llh[idx]
 
         return logLambda, logLambda_grad
-
-    def powerlaw_weights(self, src_dec, dgamma=0, **fit_pars):
-        r"""Calculate the weight of each sample assuming a power-law
-        distribution.
-
-        Parameters
-        -----------
-        src_dec : float
-            Declination of point source location.
-
-        dy : int
-            Order of gradient in gamma-direction.
-
-        fit_pars : dict
-            Fit parameters, important value is gamma, set to *_gamma_def* if
-            not present.
-
-        """
-
-        gamma = fit_pars.pop("gamma", self._gamma_def)
-
-        # check if samples and splines are both equal, otherwise re-do spline
-        if set(self._nuhist) != set(self._nuspline):
-            # delete all old splines
-            for key in self._nuspline.iterkeys():
-                del self._nuspline[key]
-
-            hist_sum = np.sum([i for i in self._nuhist.itervalues()], axis=0)
-
-            # calculate ratio and spline this
-            for key, hist in self._nuhist.iteritems():
-                rel_hist = np.log(hist) - np.log(hist_sum)
-
-                self._nuspline[key] = scipy.interpolate.RectBivariateSpline(
-                            self._sindec_binmids, self._gamma_binmids,
-                            rel_hist, kx=2, ky=2, s=0)
-
-        out_dict = dict([(key, np.exp(val(np.sin(src_dec), gamma, grid=False,
-                                      dy=0.)))
-                         for key, val in self._nuspline.iteritems()])
-
-        if dgamma == 1.:
-            # chain rule d/dy exp(f) = exp(f) *df/dy
-            out_dict = dict([(key, val
-                                   * self._nuspline[key](np.sin(src_dec),
-                                                         gamma,
-                                                         grid=False,
-                                                         dy=dgamma))
-                             for key, val in out_dict.iteritems()])
-
-        return out_dict
 
     def reset(self):
         r"""Reset all cached values for this class and all stored PS-samples.
