@@ -18,25 +18,29 @@ from skylab.ps_model import ClassicLLH, EnergyLLH
 
 log_mean = np.log(np.radians(2.5))
 log_sig = 0.5
-logE_mean = np.log(1.)
-logE_sig = 1.
+logE_res = 0.3
 
 np.random.seed(1)
 
 def exp(N=100):
     r"""Create uniformly distributed data on sphere. """
+    g = 3.7
+
     arr = np.empty((N, ), dtype=[("ra", np.float), ("sinDec", np.float),
                                  ("sigma", np.float), ("logE", np.float)])
 
     arr["ra"] = np.random.uniform(0., 2.*np.pi, N)
     arr["sinDec"] = np.random.uniform(-1., 1., N)
     arr["sigma"] = np.random.lognormal(mean=log_mean, sigma=log_sig, size=N)
-    arr["logE"] = logE_mean + logE_sig * np.random.normal(size=N)
+    x = np.random.uniform(0., 1., size=N)
+    arr["logE"] = np.log10(1. - x) / (1. - g) + logE_res * np.random.normal(size=N)
 
     return arr
 
 def MC(N=1000):
     r"""Create uniformly distributed MC data on sphere. """
+    g = 2.
+
     arr = np.empty((N, ), dtype=[("ra", np.float), ("sinDec", np.float),
                                  ("sigma", np.float), ("logE", np.float),
                                  ("trueRa", np.float), ("trueDec", np.float),
@@ -46,7 +50,8 @@ def MC(N=1000):
 
     arr["trueRa"] = np.random.uniform(0., 2.*np.pi, N)
     arr["trueDec"] = np.arcsin(np.random.uniform(-1., 1., N))
-    arr["trueE"] = np.random.lognormal(mean=logE_mean, sigma=logE_sig, size=N)
+    x = np.random.uniform(0., 1., N)
+    arr["trueE"] = (1. - x)**(1. / (1. - g))
     arr["ow"] = arr["trueE"]
     arr["ow"] /= arr["ow"].sum()
 
@@ -54,7 +59,7 @@ def MC(N=1000):
     arr["sigma"] = np.random.lognormal(mean=log_mean, sigma=log_sig, size=N)
     arr["ra"] = arr["trueRa"] + np.cos(eta) * arr["sigma"] / np.cos(arr["trueDec"])
     arr["sinDec"] = np.sin(arr["trueDec"] + np.sin(eta) * arr["sigma"])
-    arr["logE"] = np.log10(arr["trueE"]) + np.random.normal(size=len(arr)) #/ 4
+    arr["logE"] = np.log10(arr["trueE"]) + logE_res * np.random.normal(size=len(arr))
 
     return arr
 

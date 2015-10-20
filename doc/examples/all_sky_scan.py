@@ -51,7 +51,7 @@ if __name__=="__main__":
             q.mask = ~(scan["nsources"]
                        > np.percentile(scan["nsources"][scan["nsources"] > 0],
                                        eps))
-        hp.mollview(q, unit=key, cmap=plt.cm.cubehelix,
+        hp.mollview(q, unit=key, cmap=plt.cm.cubehelix_r,
                     rot=[-180., 0., 0.],
                     min=min(0., np.percentile(scan[key], eps)),
                     max=np.percentile(scan[key], 100. - eps))
