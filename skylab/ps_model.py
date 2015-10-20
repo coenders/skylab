@@ -301,6 +301,10 @@ class ClassicLLH(NullModel):
 
         """
 
+        if (np.sin(dec) < self.sinDec_bins[0]
+                or np.sin(dec) > self.sinDec_bins[-1]):
+            return 0., None
+
         return self._spl_effA(dec), None
 
     def reset(self):
@@ -765,6 +769,10 @@ class PowerLawLLH(WeightLLH):
             Gradient at given point(s).
 
         """
+
+        if (np.sin(dec) < self.sinDec_bins[0]
+                or np.sin(dec) > self.sinDec_bins[-1]):
+            return 0., None
 
         gamma = params["gamma"]
 
