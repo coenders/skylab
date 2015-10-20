@@ -1458,7 +1458,7 @@ class PointSourceLLH(object):
                              " same length!")
 
         # setup source injector
-        inj.fill(src_dec, mc)
+        inj.fill(src_dec, mc, self.livetime)
 
         print("Estimate Sensitivity for declination {0:5.1f} deg".format(
                 np.degrees(src_dec)))
@@ -1816,6 +1816,16 @@ class MultiPointSourceLLH(PointSourceLLH):
         self._gamma_binmids = (value[1:] + value[:-1]) / 2.
 
         return
+
+    @property
+    def livetime(self):
+        return dict([(enum, sam.livetime)
+                     for enum, sam in self._sams.iteritems()])
+
+    @livetime.setter
+    def livetime(self, val):
+        raise NotImplementedError("Livetime is defined in add sub-classes "
+                                  "PointSourceLLH")
 
     @property
     def params(self):
