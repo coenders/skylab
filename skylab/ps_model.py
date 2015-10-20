@@ -146,9 +146,11 @@ class ClassicLLH(NullModel):
     sinDec_bins = _sinDec_bins
     sinDec_range = _sinDec_range
 
-    order = _1dim_order
+    _order = _1dim_order
 
     _bckg_spline = np.nan
+
+    _gamma = 2.
 
     def __init__(self, *args, **kwargs):
         r"""Constructor of ClassicLLH. Set all configurations here.
@@ -162,7 +164,7 @@ class ClassicLLH(NullModel):
 
         return
 
-    def __call__(self, exp, mc):
+    def __call__(self, exp, mc, **kwargs):
         r"""Use experimental data to create one dimensional spline of
         declination information for background information.
 
@@ -180,6 +182,8 @@ class ClassicLLH(NullModel):
                                   bins=self.sinDec_bins,
                                   range=self.sinDec_range)
 
+        # background spline
+
         # overwrite range and bins to actual bin edges
         self.sinDec_bins = bins
         self.sinDec_range = (bins[0], bins[-1])
@@ -195,6 +199,9 @@ class ClassicLLH(NullModel):
         self._bckg_spline = scipy.interpolate.InterpolatedUnivariateSpline(
                                 (bins[1:] + bins[:-1]) / 2.,
                                 np.log(hist), k=self.order)
+
+        # eff. Area
+        self._effA(mc, **kwargs)
 
         return
 
@@ -212,6 +219,27 @@ class ClassicLLH(NullModel):
 
         return out_str
 
+    def _effA(self, mc, **kwargs):
+        r"""Build splines for effective Area given a fixed spectral
+        index *gamma*.
+
+        """
+
+        # powerlaw weights
+        w = mc["ow"] * mc["trueE"]**(-self.gamma)
+
+        # get pdf of event distribution
+        h, bins = np.histogram(np.sin(mc["trueDec"]), weights=w,
+                               bins=self.sinDec_bins, density=True)
+
+        # multiply histogram by event sum for event densitiy
+        h *= w.sum()
+
+        self._spl_effA = scipy.interpolate.InterpolatedUnivariateSpline(
+                (bins[1:] + bins[:-1]) / 2., np.log(h), k=self.order)
+
+        return
+
     @property
     def bckg_spline(self):
         return self._bckg_spline
@@ -223,6 +251,26 @@ class ClassicLLH(NullModel):
             return
 
         self._bckg_spline = val
+
+        return
+
+    @property
+    def gamma(self):
+        return self._gamma
+
+    @gamma.setter
+    def gamma(self, val):
+        self._gamma = float(val)
+
+        return
+
+    @property
+    def order(self):
+        return self._order
+
+    @order.setter
+    def order(self, val):
+        self.order = int(val)
 
         return
 
@@ -246,6 +294,14 @@ class ClassicLLH(NullModel):
 
         """
         return 1. / 2. / np.pi * np.exp(self.bckg_spline(ev["sinDec"]))
+
+    def effA(self, dec, **params):
+        r"""Calculate integrated effective Area at declination for distributing
+        source events among different samples.
+
+        """
+
+        return self._spl_effA(dec), None
 
     def reset(self):
         r"""Classic likelihood does only depend on spatial part, needs no
@@ -381,12 +437,6 @@ class WeightLLH(ClassicLLH):
 
         """
 
-        # create spatial splines of classic LLH class
-        super(WeightLLH, self).__call__(exp, mc)
-
-        # store monte carlo events for calculation of background weights
-        self._mc = mc
-
         self._setup(exp)
 
         # calclate splines for all values of splines
@@ -403,11 +453,11 @@ class WeightLLH(ClassicLLH):
         pars = par_grid.keys()
         for tup in product(*par_grid.values()):
             # call spline function to cache the spline
-            self._ratio_spline(**dict([(p_i, self._around(t_i))
-                                       for p_i, t_i in zip(pars, tup)]))
+            self._ratio_spline(mc, **dict([(p_i, self._around(t_i))
+                                           for p_i, t_i in zip(pars, tup)]))
 
-        # all calculations done, delete monte carlo information
-        del self._mc
+        # create spatial splines of classic LLH class
+        super(WeightLLH, self).__call__(exp, mc, **par_grid)
 
         return
 
@@ -425,16 +475,6 @@ class WeightLLH(ClassicLLH):
         out_str += 67*"~"+"\n"
 
         return out_str
-
-    @property
-    def hist_pars(self):
-        return self._hist_pars
-
-    @hist_pars.setter
-    def hist_pars(self, val):
-        self._hist_pars = list(val)
-
-        return
 
     def _around(self, value):
         r"""Round a value to a precision defined in the class.
@@ -489,13 +529,15 @@ class WeightLLH(ClassicLLH):
 
         return h, binedges
 
-    def _ratio_spline(self, **params):
+    def _ratio_spline(self, mc, **params):
         r"""Create the ratio of signal over background probabilities. With same
         binning, the bin hypervolume cancels out, ensuring correct
         normalisation of the histograms.
 
         Parameters
         -----------
+        mc : recarray
+            Monte Carlo events to use for spline creation
         params : dict
             (Physics) parameters used for signal pdf calculation.
 
@@ -506,12 +548,11 @@ class WeightLLH(ClassicLLH):
 
         """
 
-        mcvars = [self._mc[p] if not p == "sinDec"
-                              else np.sin(self._mc["trueDec"])
+        mcvars = [mc[p] if not p == "sinDec" else np.sin(mc["trueDec"])
                   for p in self.hist_pars]
 
         # create MC histogram
-        wSh, wSb = self._hist(mcvars, weights=self._get_weights(**params))
+        wSh, wSb = self._hist(mcvars, weights=self._get_weights(mc, **params))
         wSh = kernel_func(wSh, self._XX)
         wSd = wSh > 0.
 
@@ -566,6 +607,16 @@ class WeightLLH(ClassicLLH):
         """
         return spline(np.vstack([ev[p] for p in self.hist_pars]).T)
 
+    @property
+    def hist_pars(self):
+        return self._hist_pars
+
+    @hist_pars.setter
+    def hist_pars(self, val):
+        self._hist_pars = list(val)
+
+        return
+
     def reset(self):
         r"""Energy weights are cached, reset all cached values.
 
@@ -602,7 +653,9 @@ class WeightLLH(ClassicLLH):
         dg = self._precision
 
         # check whether the grid point of evaluation has changed
-        if g1 == self._g1 and len(ev) == len(self._w_cache):
+        if (np.isfinite(self._g1)
+                and g1 == self._g1
+                and len(ev) == len(self._w_cache)):
             S1 = self._w_cache["S1"]
             a = self._w_cache["a"]
             b = self._w_cache["b"]
@@ -655,7 +708,28 @@ class PowerLawLLH(WeightLLH):
 
         return
 
-    def _get_weights(self, **params):
+    def _effA(self, mc, **pars):
+        r"""Calculate two dimensional spline of effective Area versus
+        declination and spectral index for Monte Carlo.
+
+        """
+
+        gamma_vals = pars["gamma"]
+
+        x = np.sin(mc["trueDec"])
+        hist = np.vstack([np.histogram(x,
+                                       weights=self._get_weights(mc, gamma=gm),
+                                       bins=self.sinDec_bins)[0]
+                          for gm in gamma_vals]).T
+
+        self._spl_effA = scipy.interpolate.RectBivariateSpline(
+                (self.sinDec_bins[1:] + self.sinDec_bins[:-1]), gamma_vals,
+                np.log(hist), kx=2, ky=2, s=0)
+
+        return
+
+    @staticmethod
+    def _get_weights(mc, **params):
         r"""Calculate weights using the given parameters.
 
         Parameters
@@ -670,8 +744,34 @@ class PowerLawLLH(WeightLLH):
 
         """
 
-        return self._mc["ow"] * self._mc["trueE"]**(-params["gamma"])
+        return mc["ow"] * mc["trueE"]**(-params["gamma"])
 
+    def effA(self, dec, **params):
+        r"""Evaluate effective Area at declination and spectral index.
+
+        Parameters
+        -----------
+        dec : float
+            Declination.
+
+        gamma : float
+            Spectral index.
+
+        Returns
+        --------
+        effA : float
+            Effective area at given point(s).
+        grad_effA : float
+            Gradient at given point(s).
+
+        """
+
+        gamma = params["gamma"]
+
+        val = np.exp(self._spl_effA(np.sin(dec), gamma, grid=False, dy=0.))
+        grad = val * self._spl_effA(np.sin(dec), gamma, grid=False, dy=1.)
+
+        return val, dict(gamma=grad)
 
 
 class EnergyLLH(PowerLawLLH):
