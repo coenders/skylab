@@ -83,12 +83,13 @@ _n = 0
 _n_iter = 1000
 _n_trials = int(1e5)
 _nside = 128
+_nsource = 15.
+_nsource_bounds = (0., 1000.)
+_nsource_rho = 0.9
 _out_print = 0.1
 _pgtol = 1.e-3
 _pVal = lambda TS, sinDec: TS
 _rho_max = 0.95
-_rho_nsource = 0.01
-_rho_nsource_bounds = (0., 0.9)
 _src_dec = np.nan
 _src_ra = np.nan
 _seed = None
@@ -131,6 +132,13 @@ class PointSourceLLH(object):
     nside : int
         N_Side value for pixelisation of SkyMap in `HealPix`. Value has to be
         valid power of 2.
+    nsource : float
+        Seed value for fitting nsource parameter.
+    nsource_bounds : array
+        Boundaries for fitting nsource parameter.
+    nsource_rho : float
+        Percentage of upper bound to not exceed nsource_rho times number of
+        selected events.
     seed : int
         Global seed for NumPy's random mode.
     threshold : float
@@ -164,8 +172,9 @@ class PointSourceLLH(object):
     _llh_model = None
 
     # settings for fitting
-    _rho_nsource = _rho_nsource
-    _rho_nsource_bounds = _rho_nsource_bounds
+    _nsource = _nsource
+    _nsource_bounds = _nsource_bounds
+    _nsource_rho = _nsource_rho
 
     # multiprocessing
     _ncpu = 1
@@ -549,15 +558,17 @@ class PointSourceLLH(object):
 
     @property
     def par_bounds(self):
-        return np.array([self._n * np.array(self._rho_nsource_bounds)] +
+        return np.array([np.array(self.nsource_bounds)] +
                         [self.llh_model.params[par][1]
                             for par in self.params[1:]])
 
     @property
     def par_seeds(self):
-        return np.array([self._n * self._rho_nsource] +
-                        [self.llh_model.params[par][0]
-                            for par in self.params[1:]])
+        return np.array([min(self.nsource,
+                             self.nsource_rho * self._n
+                                if self._n > 0. else self.nsource)]
+                        + [self.llh_model.params[par][0]
+                           for par in self.params[1:]])
 
     @property
     def mode(self):
@@ -602,25 +613,49 @@ class PointSourceLLH(object):
         return
 
     @property
+    def nsource(self):
+        return self._nsource
+
+    @nsource.setter
+    def nsource(self, val):
+        self._nsource = float(val)
+
+        return
+
+    @property
+    def nsource_bounds(self):
+        return self._nsource_bounds
+
+    @nsource_bounds.setter
+    def nsource_bounds(self, val):
+        if not len(val) == 2:
+            raise ValueError("Bounds have to be of length 2!")
+
+        self._nsource_bounds = val
+
+        return
+
+    @property
+    def nsource_rho(self):
+        return self._nsource_rho
+
+    @nsource_rho.setter
+    def nsource_rho(self, val):
+        val = float(val)
+        if val < 0 or val > 1.:
+            raise ValueError("nsource_rho not in [0, 1] interval")
+
+        self._nsource_rho = val
+
+        return
+
+    @property
     def random(self):
         return self._random
 
     @random.setter
     def random(self, value):
         self._random = value
-
-        return
-
-    @property
-    def rho_nsource_bounds(self):
-        return self._rho_nsource_bounds
-
-    @rho_nsource_bounds.setter
-    def rho_nsource_bounds(self, val):
-        if not len(val) == 2:
-            raise ValueError("Bounds have to be of length 2!")
-
-        self._rho_nsource_bounds = val
 
         return
 
@@ -1495,7 +1530,7 @@ class PointSourceLLH(object):
                               int(hours), int(mins), secs))
 
                     print("Fit background function to scrambles")
-                    if self.rho_nsource_bounds[0] < 0:
+                    if self.nsource_bounds[0] < 0:
                         print("Fit two sided chi2 to background scrambles")
                         fitfun = utils.twoside_chi2
                     else:
@@ -1847,7 +1882,7 @@ class MultiPointSourceLLH(PointSourceLLH):
 
         ns = sum([sam._n for sam in self._sams.itervalues()])
 
-        return np.array([ns * np.array(self._rho_nsource_bounds)]
+        return np.array([np.array(self.nsource_bounds)]
                         + par_bounds)
 
     @property
@@ -1860,7 +1895,9 @@ class MultiPointSourceLLH(PointSourceLLH):
 
         N = np.sum([sam._n for sam in self._sams.itervalues()])
 
-        return np.array([N * self._rho_nsource] + par_seeds)
+        return np.array([min(self.nsource,
+                             N * self.nsource_rho if N > 0 else self.nsource)]
+                         + par_seeds)
 
     @property
     def sindec_bins(self):
@@ -1940,6 +1977,9 @@ class MultiPointSourceLLH(PointSourceLLH):
         for i, (enum, sam) in enumerate(self._sams.iteritems()):
             w[i], dw = sam.llh_model.effA(src_dec, **fit_pars)
 
+            # adjust livetime
+            w[i] *= sam.livetime
+
             if dw is None:
                 continue
 
@@ -1947,7 +1987,7 @@ class MultiPointSourceLLH(PointSourceLLH):
                 if par not in dw:
                     continue
 
-                grad_w[i, j] = dw[par]
+                grad_w[i, j] = dw[par] * sam.livetime
 
         # normalize weights to one
         grad_w /= w.sum()
