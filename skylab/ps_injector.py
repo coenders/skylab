@@ -353,7 +353,7 @@ class PointSourceInjector(Injector):
 
         return
 
-    def fill(self, src_dec, mc):
+    def fill(self, src_dec, mc, livetime):
         r"""Fill the Injector with MonteCarlo events selecting events around
         the source position(s).
 
@@ -361,11 +361,15 @@ class PointSourceInjector(Injector):
         -----------
         src_dec : float, array-like
             Source location(s)
-
         mc : recarray, dict of recarrays with sample enum as key (MultiPointSourceLLH)
             Monte Carlo events
+        livetime : float, dict of floats
+            Livetime per sample
 
         """
+
+        if isinstance(mc, dict) ^ isinstance(livetime, dict):
+            raise ValueError("mc and livetime not compatible")
 
         self.src_dec = src_dec
 
@@ -375,6 +379,7 @@ class PointSourceInjector(Injector):
 
         if not isinstance(mc, dict):
             mc = {-1: mc}
+            livetime = {-1: livetime}
 
         for key, mc_i in mc.iteritems():
             # get MC event's in the selected energy and sinDec range
@@ -395,7 +400,7 @@ class PointSourceInjector(Injector):
             mc_arr = np.empty(N, dtype=self.mc_arr.dtype)
             mc_arr["idx"] = np.arange(N)
             mc_arr["enum"] = key * np.ones(N)
-            mc_arr["ow"] = self.mc[key]["ow"]
+            mc_arr["ow"] = self.mc[key]["ow"] * livetime[key] * 86400.
             mc_arr["trueE"] = self.mc[key]["trueE"]
 
             self.mc_arr = np.append(self.mc_arr, mc_arr)

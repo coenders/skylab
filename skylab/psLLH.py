@@ -83,12 +83,13 @@ _n = 0
 _n_iter = 1000
 _n_trials = int(1e5)
 _nside = 128
+_nsource = 15.
+_nsource_bounds = (0., 1000.)
+_nsource_rho = 0.9
 _out_print = 0.1
 _pgtol = 1.e-3
 _pVal = lambda TS, sinDec: TS
 _rho_max = 0.95
-_rho_nsource = 0.01
-_rho_nsource_bounds = (0., 0.9)
 _src_dec = np.nan
 _src_ra = np.nan
 _seed = None
@@ -131,6 +132,13 @@ class PointSourceLLH(object):
     nside : int
         N_Side value for pixelisation of SkyMap in `HealPix`. Value has to be
         valid power of 2.
+    nsource : float
+        Seed value for fitting nsource parameter.
+    nsource_bounds : array
+        Boundaries for fitting nsource parameter.
+    nsource_rho : float
+        Percentage of upper bound to not exceed nsource_rho times number of
+        selected events.
     seed : int
         Global seed for NumPy's random mode.
     threshold : float
@@ -161,11 +169,12 @@ class PointSourceLLH(object):
     _out_print = _out_print
 
     # LLH model
-    _llh_model = ps_model.ClassicLLH()
+    _llh_model = None
 
     # settings for fitting
-    _rho_nsource = _rho_nsource
-    _rho_nsource_bounds = _rho_nsource_bounds
+    _nsource = _nsource
+    _nsource_bounds = _nsource_bounds
+    _nsource_rho = _nsource_rho
 
     # multiprocessing
     _ncpu = 1
@@ -207,7 +216,8 @@ class PointSourceLLH(object):
             model. Essential values are `ra`, `sinDec`, `sigma`.
         mc : NumPy structured array
             Monte Carlo data similar to `exp`, with additional Monte Carlo
-            information `trueRa`, `trueDec`, `trueE`, `ow`.
+            information `trueRa`, `trueDec`, `trueE`, `ow`. Used for the
+            creation of weighting splines that need signal information.
         livetime : float
             Livetime of experimental data.
 
@@ -273,19 +283,23 @@ class PointSourceLLH(object):
 
             exp = RS.choice(exp, size=mu)
 
-        for name, val in zip(["exp", "mc"], [exp, mc]):
-            fields = val.dtype.fields.keys()
-            if not "sinDec" in fields:
-                val = numpy.lib.recfunctions.append_fields(
-                        val, "sinDec", np.sin(val["dec"]),
-                        dtypes=np.float, usemask=False)
-            setattr(self, name, val)
+        # store exp data, add sinDec information if not available
+        self.exp = exp
 
-        # weight Monte Carlo weights by livetime in seconds
-        self.mc["ow"] *=  3600. * 24. * livetime
+        if not "sinDec" in self.exp.dtype.fields:
+            self.exp = numpy.lib.recfunctions.append_fields(
+                    self.exp, "sinDec", np.sin(self.exp["dec"]),
+                    dtypes=np.float, usemask=False)
+        if not "sinDec" in mc.dtype.fields:
+            mc = numpy.lib.recfunctions.append_fields(
+                    mc, "sinDec", np.sin(mc["dec"]),
+                    dtypes=np.float, usemask=False)
 
         # Experimental data values
         self.livetime = livetime
+
+        # set llh model
+        self.llh_model = kwargs.pop("llh_model", ps_model.ClassicLLH()), mc
 
         # set all other parameters
         set_pars(self, **kwargs)
@@ -322,15 +336,6 @@ class PointSourceLLH(object):
                          np.degrees(np.arcsin(np.amax(self.exp["sinDec"]))),
                          np.amin(self.exp["logE"]), np.amax(self.exp["logE"]),
                          self.livetime)
-        # Monte Carlo information
-        sout += (67*"-"+"\n"
-                 "Number of MC Events  : {0:7d}\n"
-                 "\tZenith Range       : {1:6.1f} - {2:6.1f} deg\n"
-                 "\tlog10 Energy Range : {3:6.1f} - {4:6.1f}\n").format(
-                         len(self.mc),
-                         np.degrees(np.arcsin(np.amin(self.mc["sinDec"]))),
-                         np.degrees(np.arcsin(np.amax(self.mc["sinDec"]))),
-                         np.amin(self.mc["logE"]), np.amax(self.mc["logE"]))
 
         # Selection
         if self.mode == "all":
@@ -520,14 +525,19 @@ class PointSourceLLH(object):
         return self._llh_model
 
     @llh_model.setter
-    def llh_model(self, val):
+    def llh_model(self, args):
+        if len(args) != 2:
+            raise ValueError("LLH model needs the class and mc-array as input")
+
+        val, mc = args
+
         if not isinstance(val, ps_model.NullModel):
             raise TypeError("LLH model not instance of ps_model.NullModel")
 
         # set likelihood module to variable and fill it with data
         self._llh_model = val
 
-        self._llh_model(self.exp, self.mc)
+        self._llh_model(self.exp, mc, self.livetime)
 
         return
 
@@ -548,15 +558,17 @@ class PointSourceLLH(object):
 
     @property
     def par_bounds(self):
-        return np.array([self._n * np.array(self._rho_nsource_bounds)] +
+        return np.array([np.array(self.nsource_bounds)] +
                         [self.llh_model.params[par][1]
                             for par in self.params[1:]])
 
     @property
     def par_seeds(self):
-        return np.array([self._n * self._rho_nsource] +
-                        [self.llh_model.params[par][0]
-                            for par in self.params[1:]])
+        return np.array([min(self.nsource,
+                             self.nsource_rho * self._n
+                                if self._n > 0. else self.nsource)]
+                        + [self.llh_model.params[par][0]
+                           for par in self.params[1:]])
 
     @property
     def mode(self):
@@ -601,25 +613,49 @@ class PointSourceLLH(object):
         return
 
     @property
+    def nsource(self):
+        return self._nsource
+
+    @nsource.setter
+    def nsource(self, val):
+        self._nsource = float(val)
+
+        return
+
+    @property
+    def nsource_bounds(self):
+        return self._nsource_bounds
+
+    @nsource_bounds.setter
+    def nsource_bounds(self, val):
+        if not len(val) == 2:
+            raise ValueError("Bounds have to be of length 2!")
+
+        self._nsource_bounds = val
+
+        return
+
+    @property
+    def nsource_rho(self):
+        return self._nsource_rho
+
+    @nsource_rho.setter
+    def nsource_rho(self, val):
+        val = float(val)
+        if val < 0 or val > 1.:
+            raise ValueError("nsource_rho not in [0, 1] interval")
+
+        self._nsource_rho = val
+
+        return
+
+    @property
     def random(self):
         return self._random
 
     @random.setter
     def random(self, value):
         self._random = value
-
-        return
-
-    @property
-    def rho_nsource_bounds(self):
-        return self._rho_nsource_bounds
-
-    @rho_nsource_bounds.setter
-    def rho_nsource_bounds(self, val):
-        if not len(val) == 2:
-            raise ValueError("Bounds have to be of length 2!")
-
-        self._rho_nsource_bounds = val
 
         return
 
@@ -708,7 +744,7 @@ class PointSourceLLH(object):
                         for ra_i, dec_i, xmin_i in zip(ra[mask], dec[mask],
                                                        xmins[mask])]
                 pool = multiprocessing.Pool(self.ncpu)
-                result = pool.map(fs, args)#, len(args) // self.ncpu + 1)
+                result = pool.map(fs, args)
 
                 pool.close()
                 pool.join()
@@ -958,7 +994,7 @@ class PointSourceLLH(object):
 
             pool = multiprocessing.Pool(self.ncpu)
 
-            result = pool.map(fs, args, len(args) // self.ncpu + 1)
+            result = pool.map(fs, args)
 
             pool.close()
             pool.join()
@@ -1129,8 +1165,10 @@ class PointSourceLLH(object):
             # null hypothesis is part of minimisation, fit should be negative
             if abs(fmin) > kwargs["pgtol"]:
                 # SPAM only if the distance is large
-                logger.error("Fitter returned positive value "
-                             "force to be zero.")
+                logger.error("Fitter returned positive value, "
+                             "force to be zero at null-hypothesis. "
+                             "Minimum found {0} with fmin {1}".format(
+                                 xmin, fmin))
             fmin = 0
             xmin[0] = 0.
 
@@ -1246,14 +1284,13 @@ class PointSourceLLH(object):
 
         return
 
-    def weighted_sensitivity(self, src_dec, alpha, beta, inj, **kwargs):
+    def weighted_sensitivity(self, src_dec, alpha, beta, inj, mc, **kwargs):
         """Calculate the point source sensitivity for a given source
         hypothesis using weights.
 
         All trials calculated are used at each step and weighted using the
-        Poissonian probability.
-
-        Credits for this idea goes to Asen Christov of IceCube.
+        Poissonian probability. Credits for this idea goes to Asen Christov of
+        IceCube in Geneva.
 
         Parameters
         ----------
@@ -1265,6 +1302,10 @@ class PointSourceLLH(object):
             Error of second kind
         inj : skylab.BaseInjector instance
             Injection module
+        mc : numpy-recarray
+            Monte Carlo to use for injection. Needs all fields that
+            is stored in experimental data, plus true information that the
+            injector uses: trueRa, trueDec, trueE, ow
 
         Returns
         -------
@@ -1452,7 +1493,7 @@ class PointSourceLLH(object):
                              " same length!")
 
         # setup source injector
-        inj.fill(src_dec, self.mc)
+        inj.fill(src_dec, mc, self.livetime)
 
         print("Estimate Sensitivity for declination {0:5.1f} deg".format(
                 np.degrees(src_dec)))
@@ -1489,7 +1530,7 @@ class PointSourceLLH(object):
                               int(hours), int(mins), secs))
 
                     print("Fit background function to scrambles")
-                    if self.rho_nsource_bounds[0] < 0:
+                    if self.nsource_bounds[0] < 0:
                         print("Fit two sided chi2 to background scrambles")
                         fitfun = utils.twoside_chi2
                     else:
@@ -1708,7 +1749,6 @@ class MultiPointSourceLLH(PointSourceLLH):
         self._sams = dict()
         self._nuhist = dict()
         self._nuspline = dict()
-        self.mc = dict()
 
         return
 
@@ -1813,28 +1853,36 @@ class MultiPointSourceLLH(PointSourceLLH):
         return
 
     @property
+    def livetime(self):
+        return dict([(enum, sam.livetime)
+                     for enum, sam in self._sams.iteritems()])
+
+    @livetime.setter
+    def livetime(self, val):
+        raise NotImplementedError("Livetime is defined in add sub-classes "
+                                  "PointSourceLLH")
+
+    @property
     def params(self):
         # we need to minimize over all parameters given by any likelihood model
         # gamma will be always minimised over, it is used in the weighting
         return ["nsources"] + list(set([j for i in self._sams.itervalues()
-                                        for j in i.llh_model.params.keys()]
-                                        + ["gamma"]))
+                                        for j in i.llh_model.params.keys()]))
 
     @property
     def par_bounds(self):
         # get tightest parameter bounds
         par_bounds = [np.array([sam.llh_model.params[par][1]
                                 for sam in self._sams.itervalues()
-                                if par in sam.llh_model.params]
-                                + ([self.gamma_bins[[0, -1]]]
-                                    if par is "gamma" else []))
+                                if par in sam.llh_model.params])
                       for par in self.params[1:]]
+
         par_bounds = [(np.amax(pb[:, 0]), np.amin(pb[:, 1]))
                       for pb in par_bounds]
 
         ns = sum([sam._n for sam in self._sams.itervalues()])
 
-        return np.array([ns * np.array(self._rho_nsource_bounds)]
+        return np.array([np.array(self.nsource_bounds)]
                         + par_bounds)
 
     @property
@@ -1842,21 +1890,14 @@ class MultiPointSourceLLH(PointSourceLLH):
         # get median seed for all parameters
         par_seeds = [np.median([sam.llh_model.params[par][0]
                                     for sam in self._sams.itervalues()
-                                    if par in sam.llh_model.params]
-                                    + ([self._gamma_def] if par is "gamma"
-                                                         else []))
+                                    if par in sam.llh_model.params])
                      for par in self.params[1:]]
 
-        # get weighted sum of the events for nsources
-        gamma = (par_seeds[self.params[1:].index("gamma")]
-                    if "gamma" in self.params else self._gamma_def)
+        N = np.sum([sam._n for sam in self._sams.itervalues()])
 
-        ns = sum([self._sams[enum]._n * w
-                  for enum, w in self.powerlaw_weights(
-                        self._src_dec, gamma=gamma).iteritems()])
-        N = ns * self._rho_nsource
-
-        return np.array([N] + par_seeds)
+        return np.array([min(self.nsource,
+                             N * self.nsource_rho if N > 0 else self.nsource)]
+                         + par_seeds)
 
     @property
     def sindec_bins(self):
@@ -1901,26 +1942,6 @@ class MultiPointSourceLLH(PointSourceLLH):
         self._enum[enum] = name
         self._sams[enum] = obj
 
-        # add mc info for injection
-        self.mc[enum] = obj.mc
-
-        # create histogram of signal expectation for this sample
-        x = np.sin(obj.mc["trueDec"])
-        hist = np.vstack([np.histogram(x, weights=obj.mc["ow"]
-                                                    * obj.mc["trueE"]**(-gm),
-                                       bins=self.sindec_bins)[0]
-                          for gm in self._gamma_binmids])
-        hist = hist.T
-
-        # take the mean of the histogram neighbouring bins
-        nwin = 5
-        filter_window = np.ones((nwin, nwin), dtype=np.float)
-        filter_window /= np.sum(filter_window)
-
-        self._nuhist[enum] = (convolve2d(hist, filter_window, mode="same")
-                              / convolve2d(np.ones_like(hist),
-                                           filter_window, mode="same"))
-
         return
 
     def llh(self, **fit_pars):
@@ -1947,94 +1968,65 @@ class MultiPointSourceLLH(PointSourceLLH):
         src_dec = self._src_dec
         nsources = fit_pars.pop("nsources")
 
-        w = self.powerlaw_weights(src_dec, **fit_pars)
+        # get effective area for point in parameter space plus gradients
 
-        # adjust nsources for all fit parameters
-        nsw = dict([(enum, wj*nsources) for enum, wj in w.iteritems()])
+        w = np.empty(len(self._enum), dtype=np.float)
+        grad_w = np.zeros((len(self._enum), len(self.params) - 1),
+                          dtype=np.float)
 
-        # likelihood evaluation on each sample
-        LLH_eval = dict([(enum, sam.llh(nsources=nsw[enum], **fit_pars))
-                         for enum, sam in self._sams.iteritems()])
+        for i, (enum, sam) in enumerate(self._sams.iteritems()):
+            w[i], dw = sam.llh_model.effA(src_dec, **fit_pars)
 
-        # sum up individual contributions
-        logLambda = np.sum([llh[0] for llh in LLH_eval.itervalues()])
+            if dw is None:
+                continue
+
+            for j, par in enumerate(self.params[1:]):
+                if par not in dw:
+                    continue
+
+                grad_w[i, j] = dw[par]
+
+        # normalize weights to one
+        grad_w /= w.sum()
+        w /= w.sum()
+
+        # normalized sum is bound to one, gradients need to account for
+        # this boundary by cross-talk
+        grad_w -= w[np.newaxis].T * np.sum(grad_w, axis=0)[np.newaxis]
+
+        logLambda = 0.
         logLambda_grad = np.zeros_like(self.params, dtype=np.float)
 
-        # nsources, always first parameter
-        logLambda_grad[0] = np.sum([LLH_eval[enum][-1][0] * w[enum]
-                                    for enum in self._enum.iterkeys()])
+        for k, (enum, sam) in enumerate(self._sams.iteritems()):
 
-        # parameters except nsources
-        for i, par in enumerate(self.params[1:]):
-            if par == "gamma":
-                # weights depend on gamma as only parameter
-                w_grad = self.powerlaw_weights(src_dec, dgamma=1, **fit_pars)
-                logLambda_grad[i + 1] += np.sum([nsources * dwj
-                                                 * LLH_eval[enum][-1][0]
-                                                 for enum, dwj
-                                                 in w_grad.iteritems()])
+            w_j = w[k]
+            dw_j = grad_w[k]
 
-            # loop over all likelihood models to see if they minmize in gamma
-            for enum, sam in self._sams.iteritems():
+            llh, grad_llh = sam.llh(nsources=nsources * w_j, **fit_pars)
+
+            # llh value
+            logLambda += llh
+
+            # llh gradient
+
+            # nsources
+            logLambda_grad[0] += grad_llh[0] * w_j
+
+            # other parameters
+            for i, par in enumerate(self.params[1:]):
+
+                logLambda_grad[i + 1] += grad_llh[0] * nsources * dw_j[i]
+
+                # check if this parameter is part of this samples minimizer
                 if not par in sam.params:
                     continue
 
-                ind = sam.params.index(par)
+                # get index of parameter
+                idx = sam.params.index(par)
 
-                logLambda_grad[i + 1] += LLH_eval[enum][-1][ind]
+                logLambda_grad[i + 1] += grad_llh[idx]
 
         return logLambda, logLambda_grad
-
-    def powerlaw_weights(self, src_dec, dgamma=0, **fit_pars):
-        r"""Calculate the weight of each sample assuming a power-law
-        distribution.
-
-        Parameters
-        -----------
-        src_dec : float
-            Declination of point source location.
-
-        dy : int
-            Order of gradient in gamma-direction.
-
-        fit_pars : dict
-            Fit parameters, important value is gamma, set to *_gamma_def* if
-            not present.
-
-        """
-
-        gamma = fit_pars.pop("gamma", self._gamma_def)
-
-        # check if samples and splines are both equal, otherwise re-do spline
-        if set(self._nuhist) != set(self._nuspline):
-            # delete all old splines
-            for key in self._nuspline.iterkeys():
-                del self._nuspline[key]
-
-            hist_sum = np.sum([i for i in self._nuhist.itervalues()], axis=0)
-
-            # calculate ratio and spline this
-            for key, hist in self._nuhist.iteritems():
-                rel_hist = np.log(hist) - np.log(hist_sum)
-
-                self._nuspline[key] = scipy.interpolate.RectBivariateSpline(
-                            self._sindec_binmids, self._gamma_binmids,
-                            rel_hist, kx=2, ky=2, s=0)
-
-        out_dict = dict([(key, np.exp(val(np.sin(src_dec), gamma, grid=False,
-                                      dy=0.)))
-                         for key, val in self._nuspline.iteritems()])
-
-        if dgamma == 1.:
-            # chain rule d/dy exp(f) = exp(f) *df/dy
-            out_dict = dict([(key, val
-                                   * self._nuspline[key](np.sin(src_dec),
-                                                         gamma,
-                                                         grid=False,
-                                                         dy=dgamma))
-                             for key, val in out_dict.iteritems()])
-
-        return out_dict
 
     def reset(self):
         r"""Reset all cached values for this class and all stored PS-samples.
