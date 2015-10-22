@@ -537,7 +537,7 @@ class PointSourceLLH(object):
         # set likelihood module to variable and fill it with data
         self._llh_model = val
 
-        self._llh_model(self.exp, mc)
+        self._llh_model(self.exp, mc, self.livetime)
 
         return
 
@@ -1977,9 +1977,6 @@ class MultiPointSourceLLH(PointSourceLLH):
         for i, (enum, sam) in enumerate(self._sams.iteritems()):
             w[i], dw = sam.llh_model.effA(src_dec, **fit_pars)
 
-            # adjust livetime
-            w[i] *= sam.livetime
-
             if dw is None:
                 continue
 
@@ -1987,7 +1984,7 @@ class MultiPointSourceLLH(PointSourceLLH):
                 if par not in dw:
                     continue
 
-                grad_w[i, j] = dw[par] * sam.livetime
+                grad_w[i, j] = dw[par]
 
         # normalize weights to one
         grad_w /= w.sum()

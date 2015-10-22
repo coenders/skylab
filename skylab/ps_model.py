@@ -164,7 +164,7 @@ class ClassicLLH(NullModel):
 
         return
 
-    def __call__(self, exp, mc, **kwargs):
+    def __call__(self, exp, mc, livetime, **kwargs):
         r"""Use experimental data to create one dimensional spline of
         declination information for background information.
 
@@ -175,6 +175,8 @@ class ClassicLLH(NullModel):
             ClassicLLH
         mc : structured array
             Same as exp for Monte Carlo plus true information.
+        livetime : float
+            Livetime to scale the Monte Carlo with
 
         """
 
@@ -201,7 +203,7 @@ class ClassicLLH(NullModel):
                                 np.log(hist), k=self.order)
 
         # eff. Area
-        self._effA(mc, **kwargs)
+        self._effA(mc, livetime, **kwargs)
 
         return
 
@@ -219,14 +221,14 @@ class ClassicLLH(NullModel):
 
         return out_str
 
-    def _effA(self, mc, **kwargs):
+    def _effA(self, mc, livetime, **kwargs):
         r"""Build splines for effective Area given a fixed spectral
         index *gamma*.
 
         """
 
         # powerlaw weights
-        w = mc["ow"] * mc["trueE"]**(-self.gamma)
+        w = mc["ow"] * mc["trueE"]**(-self.gamma) * livetime * 86400.
 
         # get pdf of event distribution
         h, bins = np.histogram(np.sin(mc["trueDec"]), weights=w,
@@ -435,7 +437,7 @@ class WeightLLH(ClassicLLH):
 
         return
 
-    def __call__(self, exp, mc):
+    def __call__(self, exp, mc, livetime):
         r"""In addition to *classicLLH.__call__(),
         splines for energy-declination are created as well.
 
@@ -461,7 +463,7 @@ class WeightLLH(ClassicLLH):
                                            for p_i, t_i in zip(pars, tup)]))
 
         # create spatial splines of classic LLH class
-        super(WeightLLH, self).__call__(exp, mc, **par_grid)
+        super(WeightLLH, self).__call__(exp, mc, livetime, **par_grid)
 
         return
 
@@ -712,7 +714,7 @@ class PowerLawLLH(WeightLLH):
 
         return
 
-    def _effA(self, mc, **pars):
+    def _effA(self, mc, livetime, **pars):
         r"""Calculate two dimensional spline of effective Area versus
         declination and spectral index for Monte Carlo.
 
@@ -722,7 +724,8 @@ class PowerLawLLH(WeightLLH):
 
         x = np.sin(mc["trueDec"])
         hist = np.vstack([np.histogram(x,
-                                       weights=self._get_weights(mc, gamma=gm),
+                                       weights=self._get_weights(mc, gamma=gm)
+                                                * livetime * 86400.,
                                        bins=self.sinDec_bins)[0]
                           for gm in gamma_vals]).T
 
