@@ -14,7 +14,7 @@ import numpy as np
 
 # skylab
 from skylab.psLLH import PointSourceLLH, MultiPointSourceLLH
-from skylab.ps_model import ClassicLLH, EnergyLLH
+from skylab.ps_model import UniformLLH, EnergyLLH
 
 log_mean = np.log(np.radians(2.5))
 log_sig = 0.5
@@ -77,7 +77,7 @@ def init(Nexp, NMC, energy=False, **kwargs):
                                                        arr_exp["logE"].max())],
                                              [-1., 1.]])
     else:
-        llh_model = ClassicLLH(sinDec_bins=max(3, Nexp // 200),
+        llh_model = UniformLLH(sinDec_bins=max(3, Nexp // 200),
                                sinDec_range=[-1., 1.])
 
     llh = PointSourceLLH(arr_exp, arr_mc, 365., llh_model=llh_model,

@@ -15,7 +15,7 @@ pVal_func = lambda TS, dec: -np.log10(0.5 * (chi2(len(llh.params)).sf(TS)
 if __name__=="__main__":
 
     # init the llh class
-    llh = data.multi_init(4, 1000, 100000, ncpu=1, energy=True)
+    llh = data.multi_init(4, 1000, 100000, ncpu=4)#, energy=True)
 
     print(llh)
 
@@ -28,17 +28,18 @@ if __name__=="__main__":
             break
 
     # plot results
-    hp.mollview(scan["pVal"], min=0., cmap=plt.cm.afmhot, rot=[-180., 0., 0.])
+    from utilities.plotutils import cmaps
+    hp.mollview(scan["pVal"], min=0., cmap=plt.cm.afmhot,
+                rot=[-180., 0., 0.])
     if isinstance(llh, MultiPointSourceLLH):
         for llh in llh._sams.itervalues():
             hp.projscatter(np.degrees(llh.exp["ra"]),
                            np.degrees(np.arcsin(llh.exp["sinDec"])),
-                           rot=[-180., 0., 0.],
-                           lonlat=True, marker="x", color=plt.gca()._get_lines.color_cycle.next())
+                           lonlat=True, marker="x",
+                           color=plt.gca()._get_lines.color_cycle.next())
     else:
         hp.projscatter(np.degrees(llh.exp["ra"]),
                        np.degrees(np.arcsin(llh.exp["sinDec"])),
-                       rot=[-180., 0., 0.],
                        lonlat=True, marker="x", color="red")
 
     plt.show()
