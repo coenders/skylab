@@ -897,10 +897,11 @@ class PointSourceLLH(object):
 
                 mask &= (dmask|tmask)
 
-            print("Scanning area of ~{0:4.2f}pi sr ({1:7.2%})".format(
+            print("Scanning area of ~{0:4.2f}pi sr ({1:7.2%}, {2:d} pix)".format(
                         np.sum(mask, dtype=np.float)
                             * hp.pixelfunc.nside2pixarea(nside) / np.pi,
-                        np.sum(mask, dtype=np.float) / len(mask)))
+                        np.sum(mask, dtype=np.float) / len(mask),
+                        np.sum(mask)))
 
             start = time.time()
 

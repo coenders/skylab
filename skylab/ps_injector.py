@@ -566,21 +566,21 @@ class ModelInjector(PointSourceInjector):
 
         """
 
-        trueLogGeV = np.log10(self.mc["trueE"]) - np.log10(self.GeV)
+        trueLogGeV = np.log10(self.mc_arr["trueE"]) - np.log10(self.GeV)
 
         logF = self._spline(trueLogGeV)
         flux = np.power(10., logF - 2. * trueLogGeV) / self.GeV
 
         # remove NaN's, etc.
         m = (flux > 0.) & np.isfinite(flux)
-        self.mc = self.mc[m]
+        self.mc_arr = self.mc_arr[m]
 
         # assign flux to OneWeight
-        self.mc["ow"] *= flux[m] / self._omega
+        self.mc_arr["ow"] *= flux[m] / self._omega
 
-        self._raw_flux = np.sum(self.mc["ow"], dtype=np.float)
+        self._raw_flux = np.sum(self.mc_arr["ow"], dtype=np.float)
 
-        self._norm_w = self.mc["ow"] / self._raw_flux
+        self._norm_w = self.mc_arr["ow"] / self._raw_flux
 
         return
 

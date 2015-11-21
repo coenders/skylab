@@ -349,6 +349,14 @@ class ClassicLLH(NullModel):
         return np.ones(len(ev)), None
 
 
+class UniformLLH(ClassicLLH):
+    r"""Spatial LLH class that assumes uniform distribution.
+
+    """
+    def background(self, ev):
+        return np.full(len(ev), 1. / 4. / np.pi)
+
+
 class WeightLLH(ClassicLLH):
     r"""Likelihood class supporting weights for the calculation.
 
