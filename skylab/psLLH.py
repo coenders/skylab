@@ -1424,6 +1424,10 @@ class PointSourceLLH(object):
                 bounds = np.percentile(trials["n_inj"][trials["n_inj"] > 0],
                                        [_ub_perc, 100. - _ub_perc])
 
+                if bounds[0] == 1:
+                    bounds[0] = (float(np.count_nonzero(trials["n_inj"] == 1))
+                                    / np.sum(trials["n_inj"] < 2))
+
                 print("\tEstimate sens. in region {0:5.1f} to {1:5.1f}".format(
                             *bounds))
 
