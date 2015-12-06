@@ -16,7 +16,7 @@ import numpy as np
 from skylab.psLLH import PointSourceLLH, MultiPointSourceLLH
 from skylab.ps_model import UniformLLH, EnergyLLH
 
-log_mean = np.log(np.radians(2.5))
+log_mean = np.log(np.radians(1.))
 log_sig = 0.5
 logE_res = 0.3
 
@@ -31,9 +31,11 @@ def exp(N=100):
 
     arr["ra"] = np.random.uniform(0., 2.*np.pi, N)
     arr["sinDec"] = np.random.uniform(-1., 1., N)
-    arr["sigma"] = np.random.lognormal(mean=log_mean, sigma=log_sig, size=N)
+
     x = np.random.uniform(0., 1., size=N)
-    arr["logE"] = np.log10(1. - x) / (1. - g) + logE_res * np.random.normal(size=N)
+    E = np.log10(1. - x) / (1. - g)
+    arr["sigma"] = np.random.lognormal(mean=log_mean, sigma=log_sig, size=N)
+    arr["logE"] = E + logE_res * np.random.normal(size=N)
 
     return arr
 
