@@ -1942,7 +1942,11 @@ class MultiPointSourceLLH(PointSourceLLH):
         if not isinstance(obj, PointSourceLLH):
             raise ValueError("'{0}' is not LLH-style".format(obj))
 
-        enum = max(self._enum) + 1 if self._enum else 0
+        if name in self._enum.values():
+            enum = self._enum.keys()[self._enum.values().index(name)]
+            print("Overwrite Sample {0:2d} - {1:s}".format(enum, name))
+        else:
+            enum = max(self._enum) + 1 if self._enum else 0
 
         self._enum[enum] = name
         self._sams[enum] = obj
