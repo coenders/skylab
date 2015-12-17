@@ -14,11 +14,11 @@ import numpy as np
 
 # skylab
 from skylab.psLLH import PointSourceLLH, MultiPointSourceLLH
-from skylab.ps_model import UniformLLH, EnergyLLH
+from skylab.ps_model import UniformLLH, EnergyLLH, PowerLawLLH
 
-log_mean = np.log(np.radians(1.))
-log_sig = 0.5
-logE_res = 0.3
+log_mean = np.log(np.radians(0.5))
+log_sig = 0.2
+logE_res = 0.1
 
 np.random.seed(1)
 
@@ -32,8 +32,7 @@ def exp(N=100):
     arr["ra"] = np.random.uniform(0., 2.*np.pi, N)
     arr["sinDec"] = np.random.uniform(-1., 1., N)
 
-    x = np.random.uniform(0., 1., size=N)
-    E = np.log10(1. - x) / (1. - g)
+    E = np.log10(np.random.pareto(g, size=N) + 1)
     arr["sigma"] = np.random.lognormal(mean=log_mean, sigma=log_sig, size=N)
     arr["logE"] = E + logE_res * np.random.normal(size=N)
 
@@ -52,9 +51,8 @@ def MC(N=1000):
 
     arr["trueRa"] = np.random.uniform(0., 2.*np.pi, N)
     arr["trueDec"] = np.arcsin(np.random.uniform(-1., 1., N))
-    x = np.random.uniform(0., 1., N)
-    arr["trueE"] = (1. - x)**(1. / (1. - g))
-    arr["ow"] = arr["trueE"]
+    arr["trueE"] = np.random.pareto(g, size=N) + 1
+    arr["ow"] = arr["trueE"]**(g)
     arr["ow"] /= arr["ow"].sum()
 
     eta = np.random.uniform(0., 2.*np.pi, len(arr))
@@ -70,14 +68,21 @@ def init(Nexp, NMC, energy=False, **kwargs):
     arr_mc = MC(NMC)
 
     if energy:
-        llh_model = EnergyLLH(sinDec_bins=max(3, Nexp // 200),
+        '''
+        llh_model = EnergyLLH(sinDec_bins=min(50, Nexp // 50),
                               sinDec_range=[-1., 1.],
-                              twodim_bins=max(3, Nexp // 200),
+                              twodim_bins=min(50, Nexp // 50),
                               twodim_range=[[0.9 * min(arr_exp["logE"].min(),
                                                        arr_mc["logE"].min()),
                                              1.1 * max(arr_exp["logE"].max(),
                                                        arr_exp["logE"].max())],
                                              [-1., 1.]])
+        '''
+        llh_model = PowerLawLLH(["logE"], min(50, Nexp // 50),
+                                twodim_range=[0.9 * arr_mc["logE"].min(),
+                                              1.1 * arr_mc["logE"].max()],
+                                sinDec_bins=min(50, Nexp // 50),
+                                sinDec_range=[-1., 1.])
     else:
         llh_model = UniformLLH(sinDec_bins=max(3, Nexp // 200),
                                sinDec_range=[-1., 1.])

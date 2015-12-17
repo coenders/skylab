@@ -17,7 +17,7 @@ if __name__=="__main__":
 
     # init likelihood class
     #llh = data.multi_init(2, 1000, 250000, ncpu=4, energy=True)
-    llh = data.init(10000, 250000, ncpu=4, energy=True)
+    llh = data.init(1000, 500000, ncpu=4, energy=True)
 
     N_MC = 100000
     if isinstance(llh, MultiPointSourceLLH):
@@ -34,13 +34,21 @@ if __name__=="__main__":
     ax1.hist([llh.exp["logE"]] + [mc["logE"] for i in gamma],
              weights=[np.ones(len(llh.exp))]
                       + [mc["ow"] * mc["trueE"]**(-g) for g in gamma],
-             histtype="step", bins=100, log=True, normed=True)
+             label=["Pseudo-Data"] + [r"$\gamma={0:.1f}$".format(g) for g in gamma],
+             histtype="step", bins=100, log=True, normed=True, cumulative=-1)
+    ax1.legend(loc="best")
+
     dec = np.arcsin(mc["sinDec"])
     angdist = np.degrees(np.arccos(np.cos(mc["trueRa"] - mc["ra"])
                                     * np.cos(mc["trueDec"]) * np.cos(dec)
                                    + np.sin(mc["trueDec"]) * mc["sinDec"]))
+    '''
     ax2.hist([np.log10(np.degrees(llh.exp["sigma"]))] + [np.log10(np.degrees(mc["sigma"])) for i in gamma],
              weights=[np.ones(len(llh.exp))] + [mc["ow"] * mc["trueE"]**(-g) for g in gamma],
+             histtype="step", bins=100, normed=True)
+    '''
+    ax2.hist([np.log10(np.degrees(mc["sigma"]))] + [np.log10(angdist) for i in gamma],
+             weights=[mc["ow"] * mc["trueE"]**(-2.)] + [mc["ow"] * mc["trueE"]**(-g) for g in gamma],
              histtype="step", bins=100, normed=True)
 
     plt.show()
@@ -59,7 +67,7 @@ if __name__=="__main__":
     ntrials = 25
     T = list()
     for i in range(ntrials):
-        inject = inj.sample(mu, poisson=True).next()[1]
+        n_inj, inject = inj.sample(mu, poisson=True).next()
 
         TS, xmin = llh.fit_source(np.pi, 0., inject=inject)
 
@@ -83,7 +91,8 @@ if __name__=="__main__":
         T.append(h)
 
         plt.contour(nsources[:-1], gamma[:-1], h.T, levels=[2.3], colors="grey", alpha=0.25)
-        plt.scatter(xmin["nsources"], xmin["gamma"], marker="x")
+        plt.scatter(xmin["nsources"], xmin["gamma"], marker="x", color="grey")
+        plt.scatter(n_inj, Gamma, marker="+", color="grey")
 
     T = sum(T) / ntrials
     T -= T.min()

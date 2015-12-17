@@ -20,9 +20,9 @@ if __name__=="__main__":
 
     # init likelihood class
     #llh = data.multi_init(2, 1000, 250000, ncpu=4, energy=True)
-    llh = data.init(2000, 250000, ncpu=4, energy=True)
+    llh = data.init(10000, 500000, ncpu=4, energy=True)
 
-    N_MC = 1000
+    N_MC = 10000
     if isinstance(llh, MultiPointSourceLLH):
         mc = dict([(key, data.MC(N_MC)) for key in llh._enum.iterkeys()])
     else:
@@ -74,6 +74,7 @@ if __name__=="__main__":
                                (ybins[1:] + ybins[:-1]) / 2., h.T,
                                levels=np.linspace(0., 1., 11)[2:],
                                cmap=plt.cm.Spectral_r)
+
         plt.colorbar(mappable=p, ax=ax[i + 1])
 
         if i < 1:
