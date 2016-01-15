@@ -234,6 +234,9 @@ class ClassicLLH(NullModel):
         h, bins = np.histogram(np.sin(mc["trueDec"]), weights=w,
                                bins=self.sinDec_bins, density=True)
 
+        # normalize by solid angle
+        h /= np.diff(self.sinDec_bins)
+
         # multiply histogram by event sum for event densitiy
         h *= w.sum()
 
@@ -353,6 +356,10 @@ class UniformLLH(ClassicLLH):
     r"""Spatial LLH class that assumes uniform distribution.
 
     """
+
+    def __call__(self, *args, **kwargs):
+        return
+
     def background(self, ev):
         return np.full(len(ev), 1. / 4. / np.pi)
 
@@ -470,7 +477,7 @@ class WeightLLH(ClassicLLH):
             self._ratio_spline(mc, **dict([(p_i, self._around(t_i))
                                            for p_i, t_i in zip(pars, tup)]))
 
-        # create spatial splines of classic LLH class
+        # create spatial splines of classic LLH class and eff. Area
         super(WeightLLH, self).__call__(exp, mc, livetime, **par_grid)
 
         return
@@ -736,6 +743,11 @@ class PowerLawLLH(WeightLLH):
                                                 * livetime * 86400.,
                                        bins=self.sinDec_bins)[0]
                           for gm in gamma_vals]).T
+
+        # normalize bins by their binvolume, one dimension is the parameter
+        # with width of *precision*
+        bin_vol = np.diff(self.sinDec_bins)
+        hist /= bin_vol[:, np.newaxis] * np.full_like(gamma_vals, self._precision)
 
         self._spl_effA = scipy.interpolate.RectBivariateSpline(
                 (self.sinDec_bins[1:] + self.sinDec_bins[:-1]), gamma_vals,
