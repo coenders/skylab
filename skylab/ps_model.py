@@ -310,7 +310,7 @@ class ClassicLLH(NullModel):
                 or np.sin(dec) > self.sinDec_bins[-1]):
             return 0., None
 
-        return self._spl_effA(dec), None
+        return self._spl_effA(np.sin(dec)), None
 
     def reset(self):
         r"""Classic likelihood does only depend on spatial part, needs no
