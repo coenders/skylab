@@ -1752,8 +1752,6 @@ class MultiPointSourceLLH(PointSourceLLH):
         # init empty dictionary containers
         self._enum = dict()
         self._sams = dict()
-        self._nuhist = dict()
-        self._nuspline = dict()
 
         return
 

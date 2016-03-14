@@ -38,7 +38,7 @@ def plotting(backend="QT4Agg"):
     rcParams["axes.color_cycle"] =["#d7191c", "#2b83ba", "#756bb1",
                                    "#fdae61", "#abdda4"]
     rcParams["axes.labelsize"] = 10
-    rcParams["text.fontsize"] = 10
+    rcParams["text.font_size"] = 10
     rcParams["xtick.labelsize"] = 10
     rcParams["ytick.labelsize"] = 10
 
