@@ -855,7 +855,7 @@ class EnergyLLHfixed(EnergyLLH):
         super(EnergyLLHfixed, self).__init__(**kwargs)
 
         # do the call already
-        super(EnergyLLHfixed, self)(exp, mc, livetime)
+        super(EnergyLLHfixed, self).__call__(exp, mc, livetime)
 
         return
 
