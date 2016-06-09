@@ -841,3 +841,31 @@ class EnergyDistLLH(PowerLawLLH):
         return
 
 
+class EnergyLLHfixed(EnergyLLH):
+    r"""Energy Likelihood that uses external data to create the splines, and
+    splines are not evaluated using the data given by call method.
+
+    """
+    def __init__(self, exp, mc, livetime, **kwargs):
+        r"""Constructor
+
+        """
+
+        # call constructor of super-class, settings are set.
+        super(EnergyLLHfixed, self).__init__(**kwargs)
+
+        # do the call already
+        super(EnergyLLHfixed, self)(exp, mc, livetime)
+
+        return
+
+    def __call__(self, exp, mc, livetime):
+        r"""Call function not used here
+
+        """
+
+        print("EnergyLLH with FIXED splines used here, call has no effect")
+
+        return
+
+
