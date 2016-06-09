@@ -327,7 +327,7 @@ class PointSourceLLH(object):
         sout = ("{0:s}\n"
                 + 67*"-"+"\n"
                 "Number of Data Events: {1:7d}\n"
-                "\tZenith Range       : {2:6.1f} - {3:6.1f} deg\n"
+                "\tDeclination Range  : {2:6.1f} - {3:6.1f} deg\n"
                 "\tlog10 Energy Range : {4:6.1f} - {5:6.1f}\n"
                 "\tLivetime of sample : {6:7.2f} days\n").format(
                          self.__repr__(),
