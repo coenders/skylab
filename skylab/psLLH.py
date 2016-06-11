@@ -332,9 +332,10 @@ class PointSourceLLH(object):
                 "\tLivetime of sample : {6:7.2f} days\n").format(
                          self.__repr__(),
                          len(self.exp),
-                         np.degrees(np.arcsin(np.amin(self.exp["sinDec"]))),
-                         np.degrees(np.arcsin(np.amax(self.exp["sinDec"]))),
-                         np.amin(self.exp["logE"]), np.amax(self.exp["logE"]),
+                         np.degrees(np.arcsin(np.amin(self.exp["sinDec"]))) if len(self.exp) > 0 else np.nan,
+                         np.degrees(np.arcsin(np.amax(self.exp["sinDec"]))) if len(self.exp) > 0 else np.nan,
+                         np.amin(self.exp["logE"]) if len(self.exp) > 0 else np.nan,
+                         np.amax(self.exp["logE"]) if len(self.exp) > 0 else np.nan,
                          self.livetime)
 
         # Selection
