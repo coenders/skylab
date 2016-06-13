@@ -454,7 +454,7 @@ class PointSourceInjector(Injector):
                     * self.GeV**(1. - self.gamma) # turn from I3Unit to *GeV*
                     * self.E0**(2. - self.gamma)) # go from 1*GeV* to E0
 
-    def sample(self, mean_mu, poisson=True):
+    def sample(self, src_ra, mean_mu, poisson=True):
         r""" Generator to get sampled events for a Point Source location.
 
         Parameters
@@ -499,14 +499,14 @@ class PointSourceInjector(Injector):
                 # only one sample, just return recarray
                 sam_ev = np.copy(self.mc[enums[0]][sam_idx["idx"]])
 
-                yield num, rotate_struct(sam_ev, np.pi, self.src_dec)
+                yield num, rotate_struct(sam_ev, src_ra, self.src_dec)
                 continue
 
             sam_ev = dict()
             for enum in enums:
                 idx = sam_idx[sam_idx["enum"] == enum]["idx"]
                 sam_ev_i = np.copy(self.mc[enum][idx])
-                sam_ev[enum] = rotate_struct(sam_ev_i, np.pi, self.src_dec)
+                sam_ev[enum] = rotate_struct(sam_ev_i, src_ra, self.src_dec)
 
             yield num, sam_ev
 

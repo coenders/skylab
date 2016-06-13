@@ -946,7 +946,7 @@ class PointSourceLLH(object):
 
         return
 
-    def do_trials(self, src_dec, **kwargs):
+    def do_trials(self, src_ra, src_dec, **kwargs):
         r"""Calculation of scrambled trials.
 
         Perform trials on scrambled event maps to estimate the event
@@ -989,7 +989,7 @@ class PointSourceLLH(object):
         samples = [sam[1] for sam in samples]
 
         if self.ncpu > 1 and len(samples) > self.ncpu:
-            args = [(self, np.pi, src_dec, sam, True,
+            args = [(self, src_ra, src_dec, sam, True,
                      dict(kwargs.items()
                           + [("seed", self.random.randint(2**32))]))
                     for sam in samples]
@@ -1004,7 +1004,7 @@ class PointSourceLLH(object):
             del pool
 
         else:
-            result = [self.fit_source(np.pi, src_dec, inject=sam,
+            result = [self.fit_source(src_ra, src_dec, inject=sam,
                                       scramble=True, **kwargs)
                       for sam in samples]
 
@@ -1065,7 +1065,9 @@ class PointSourceLLH(object):
         funval[~xmask] = (np.log1p(aval)
                       + 1. / (1.+aval) * (alpha[~xmask] - aval)
                       - 1./2./(1.+aval)**2 * (alpha[~xmask]-aval)**2)
-        funval = funval.sum() + (N - n) * np.log1p(-nsources / N)
+        funval = funval.sum()
+        if N > n:
+            funval += (N - n) * np.log1p(-nsources / N)
 
         # gradients
 
@@ -1074,7 +1076,9 @@ class PointSourceLLH(object):
         ns_grad[xmask] = x[xmask] / (1. + alpha[xmask])
         ns_grad[~xmask] = (x[~xmask] / (1. + aval)
                        - x[~xmask] * (alpha[~xmask] - aval) / (1. + aval)**2)
-        ns_grad = ns_grad.sum() - (N - self._n) / (N - nsources)
+        ns_grad = ns_grad.sum()
+        if N > n:
+            ns_grad -= (N - n) / (N - nsources)
 
         # in weights
         if grad_w is not None:
@@ -1138,7 +1142,12 @@ class PointSourceLLH(object):
 
             fit_pars = dict([(par, xi) for par, xi in zip(self.params, x)])
 
-            fun, grad = self.llh(**fit_pars)
+            # check if events where selected
+            if self._N > 0:
+                fun, grad = self.llh(**fit_pars)
+            else:
+                fun = 0.
+                grad = np.zeros(len(self.params))
 
             # return negative value needed for minimization
             return -fun, -grad
@@ -1174,7 +1183,7 @@ class PointSourceLLH(object):
             fmin = 0
             xmin[0] = 0.
 
-        if abs(xmin[0]) > _rho_max * self._n:
+        if self._N > 0 and abs(xmin[0]) > _rho_max * self._n:
             logger.error(("nsources > {0:7.2%} * {1:6d} selected events, "
                           "fit-value nsources = {2:8.1f}").format(
                               _rho_max, self._n, xmin[0]))
@@ -1257,7 +1266,7 @@ class PointSourceLLH(object):
                                 _llh, pars, bounds=bounds,
                                 approx_grad=True, **kwargs)
 
-        if abs(xmin[0]) > _rho_max * self._n:
+        if self._N > 0 and abs(xmin[0]) > _rho_max * self._n:
             logger.error(("nsources > {0:7.2%} * {1:6d} selected events, "
                           "fit-value nsources = {2:8.1f}").format(
                               _rho_max, self._n, xmin[0]))
@@ -1286,7 +1295,7 @@ class PointSourceLLH(object):
 
         return
 
-    def weighted_sensitivity(self, src_dec, alpha, beta, inj, mc, **kwargs):
+    def weighted_sensitivity(self, src_ra, src_dec, alpha, beta, inj, mc, **kwargs):
         """Calculate the point source sensitivity for a given source
         hypothesis using weights.
 
@@ -1296,6 +1305,8 @@ class PointSourceLLH(object):
 
         Parameters
         ----------
+        src_ra : float
+            Source position(s)
         src_dec : float
             Source position(s)
         alpha : array-like (m, )
@@ -1374,9 +1385,9 @@ class PointSourceLLH(object):
 
                 n_inj = int(np.mean(trials["n_inj"])) if len(trials) > 0 else 0
                 while True:
-                    n_inj, sample = inj.sample(n_inj + 1, poisson=False).next()
+                    n_inj, sample = inj.sample(src_ra, n_inj + 1, poisson=False).next()
 
-                    TS_i, xmin_i = self.fit_source(np.pi, src_dec,
+                    TS_i, xmin_i = self.fit_source(src_ra, src_dec,
                                                    inject=sample,
                                                    scramble=True)
 
@@ -1405,8 +1416,8 @@ class PointSourceLLH(object):
 
                 # do trials around active region
                 trials = np.append(trials,
-                                   self.do_trials(src_dec, n_iter=n_iter,
-                                                  mu=inj.sample(mu_eff),
+                                   self.do_trials(src_ra, src_dec, n_iter=n_iter,
+                                                  mu=inj.sample(src_ra, mu_eff),
                                                   **kwargs))
 
 
@@ -1469,7 +1480,7 @@ class PointSourceLLH(object):
 
                 # do trials with best estimate
                 trials = np.append(trials, self.do_trials(
-                    src_dec, mu=inj.sample(mu_eff), n_iter=n_iter, **kwargs))
+                    src_ra, src_dec, mu=inj.sample(src_ra, mu_eff), n_iter=n_iter, **kwargs))
 
                 sys.stdout.flush()
 
@@ -1522,7 +1533,7 @@ class PointSourceLLH(object):
                           "TS value for alpha = {0:7.2%}".format(alpha_i))
 
                     trials = np.append(trials,
-                                       self.do_trials(src_dec,
+                                       self.do_trials(src_ra, src_dec,
                                                       n_iter=n_bckg,
                                                       **kwargs))
 

@@ -338,9 +338,13 @@ class ClassicLLH(NullModel):
 
         """
         cos_ev = np.sqrt(1. - ev["sinDec"]**2)
-        dist = np.arccos(np.cos(src_ra - ev["ra"])
+        cosDist = (np.cos(src_ra - ev["ra"])
                             * np.cos(src_dec) * cos_ev
-                         + np.sin(src_dec) * ev["sinDec"])
+                          + np.sin(src_dec) * ev["sinDec"])
+
+        # handle possible floating precision errors
+        cosDist[np.isclose(cosDist, 1.) & (cosDist > 1)] = 1.
+        dist = np.arccos(cosDist)
 
         return (1./2./np.pi/ev["sigma"]**2
                 * np.exp(-dist**2 / 2. / ev["sigma"]**2))
