@@ -1142,14 +1142,7 @@ class PointSourceLLH(object):
 
             fit_pars = dict([(par, xi) for par, xi in zip(self.params, x)])
 
-            # check if events where selected
-            if self._N > 0:
-                fun, grad = self.llh(**fit_pars)
-            else:
-                # if no sources were detected, simulate GRB likelihood
-                fun = -np.fabs(x[0])
-                grad = np.zeros(len(self.params))
-                grad[0] = -np.sign(x[0])
+            fun, grad = self.llh(**fit_pars)
 
             # return negative value needed for minimization
             return -fun, -grad
@@ -1160,6 +1153,11 @@ class PointSourceLLH(object):
 
         # Set all weights once for this src location, if not already cached
         self._select_events(src_ra, src_dec, inject=inject, scramble=scramble)
+
+        if self._N < 1:
+            # No events selected
+            return 0., dict([(par, par_s) if not par == "nsources" else (par, 0.)
+                             for par, par_s in zip(self.params, self.par_seeds)])
 
         # get seeds
         pars = self.par_seeds
