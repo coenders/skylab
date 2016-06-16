@@ -1180,7 +1180,7 @@ class PointSourceLLH(object):
                                     _llh, pars,
                                     bounds=self.par_bounds,
                                     **kwargs)
-            pars[0] = self.random.uniform(0., 2. * self.pars[0])
+            pars[0] = self.random.uniform(0., 2. * pars[0])
             if i > 100:
                 raise RuntimeError("Did not manage good fit")
 
