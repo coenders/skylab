@@ -328,14 +328,15 @@ class PointSourceLLH(object):
         sout = ("{0:s}\n"
                 + 67*"-"+"\n"
                 "Number of Data Events: {1:7d}\n"
-                "\tZenith Range       : {2:6.1f} - {3:6.1f} deg\n"
+                "\tDeclination Range  : {2:6.1f} - {3:6.1f} deg\n"
                 "\tlog10 Energy Range : {4:6.1f} - {5:6.1f}\n"
                 "\tLivetime of sample : {6:7.2f} days\n").format(
                          self.__repr__(),
                          len(self.exp),
-                         np.degrees(np.arcsin(np.amin(self.exp["sinDec"]))),
-                         np.degrees(np.arcsin(np.amax(self.exp["sinDec"]))),
-                         np.amin(self.exp["logE"]), np.amax(self.exp["logE"]),
+                         np.degrees(np.arcsin(np.amin(self.exp["sinDec"]))) if len(self.exp) > 0 else np.nan,
+                         np.degrees(np.arcsin(np.amax(self.exp["sinDec"]))) if len(self.exp) > 0 else np.nan,
+                         np.amin(self.exp["logE"]) if len(self.exp) > 0 else np.nan,
+                         np.amax(self.exp["logE"]) if len(self.exp) > 0 else np.nan,
                          self.livetime)
 
         # Selection
@@ -959,7 +960,7 @@ class PointSourceLLH(object):
 
         return
 
-    def do_trials(self, src_dec, **kwargs):
+    def do_trials(self, src_ra, src_dec, **kwargs):
         r"""Calculation of scrambled trials.
 
         Perform trials on scrambled event maps to estimate the event
@@ -1002,7 +1003,7 @@ class PointSourceLLH(object):
         samples = [sam[1] for sam in samples]
 
         if self.ncpu > 1 and len(samples) > self.ncpu:
-            args = [(self, np.pi, src_dec, sam, True,
+            args = [(self, src_ra, src_dec, sam, True,
                      dict(kwargs.items()
                           + [("seed", self.random.randint(2**32))]))
                     for sam in samples]
@@ -1017,7 +1018,7 @@ class PointSourceLLH(object):
             del pool
 
         else:
-            result = [self.fit_source(np.pi, src_dec, inject=sam,
+            result = [self.fit_source(src_ra, src_dec, inject=sam,
                                       scramble=True, **kwargs)
                       for sam in samples]
 
@@ -1078,7 +1079,9 @@ class PointSourceLLH(object):
         funval[~xmask] = (np.log1p(aval)
                       + 1. / (1.+aval) * (alpha[~xmask] - aval)
                       - 1./2./(1.+aval)**2 * (alpha[~xmask]-aval)**2)
-        funval = funval.sum() + (N - n) * np.log1p(-nsources / N)
+        funval = funval.sum()
+        if N > n:
+            funval += (N - n) * np.log1p(-nsources / N)
 
         # gradients
 
@@ -1087,7 +1090,9 @@ class PointSourceLLH(object):
         ns_grad[xmask] = x[xmask] / (1. + alpha[xmask])
         ns_grad[~xmask] = (x[~xmask] / (1. + aval)
                        - x[~xmask] * (alpha[~xmask] - aval) / (1. + aval)**2)
-        ns_grad = ns_grad.sum() - (N - self._n) / (N - nsources)
+        ns_grad = ns_grad.sum()
+        if N > n:
+            ns_grad -= (N - n) / (N - nsources)
 
         # in weights
         if grad_w is not None:
@@ -1163,6 +1168,11 @@ class PointSourceLLH(object):
         # Set all weights once for this src location, if not already cached
         self._select_events(src_ra, src_dec, inject=inject, scramble=scramble)
 
+        if self._N < 1:
+            # No events selected
+            return 0., dict([(par, par_s) if not par == "nsources" else (par, 0.)
+                             for par, par_s in zip(self.params, self.par_seeds)])
+
         # get seeds
         pars = self.par_seeds
         inds = [i for i, par in enumerate(self.params) if par in kwargs]
@@ -1175,19 +1185,18 @@ class PointSourceLLH(object):
                                 bounds=self.par_bounds,
                                 **kwargs)
 
-        if xmin[0] < self.par_bounds[0][0]:
-            if self.par_bounds[0][0] < 0 or self.par_bounds[0][0] > 0:
-                logger.error("N_s fit out of bounds "
-                             "({0:.2e}), set to boundary".format(xmin[0]))
-            fmin = _llh(np.append(self.par_bounds[0][0], xmin[1:]))[0]
-            xmin[0] = self.par_bounds[0][0]
-
-        elif xmin[0] > self.par_bounds[0][1]:
-            if self.par_bounds[0][1] < 0 or self.par_bounds[0][1] > 0:
-                logger.error("N_s fit out of bounds "
-                             "({0:.2e}), set to boundary".format(xmin[0]))
-            fmin = _llh(np.append(self.par_bounds[0][1], xmin[1:]))[0]
-            xmin[0] = self.par_bounds[0][1]
+        # set up mindict to enter while, exit if fit looks nice
+        i = 0
+        min_dict = dict(warnflag=0, task="FACTR")
+        while min_dict["warnflag"] == 0 and "FACTR" in min_dict["task"]:
+            # no stop due to gradient
+            xmin, fmin, min_dict = scipy.optimize.fmin_l_bfgs_b(
+                                    _llh, pars,
+                                    bounds=self.par_bounds,
+                                    **kwargs)
+            pars[0] = self.random.uniform(0., 2. * pars[0])
+            if i > 100:
+                raise RuntimeError("Did not manage good fit")
 
         if fmin > 0 and (self.par_bounds[0][0] <= 0
                          and self.par_bounds[0][1] >= 0):
@@ -1201,7 +1210,7 @@ class PointSourceLLH(object):
             fmin = 0
             xmin[0] = 0.
 
-        if abs(xmin[0]) > _rho_max * self._n:
+        if self._N > 0 and abs(xmin[0]) > _rho_max * self._n:
             logger.error(("nsources > {0:7.2%} * {1:6d} selected events, "
                           "fit-value nsources = {2:8.1f}").format(
                               _rho_max, self._n, xmin[0]))
@@ -1284,7 +1293,7 @@ class PointSourceLLH(object):
                                 _llh, pars, bounds=bounds,
                                 approx_grad=True, **kwargs)
 
-        if abs(xmin[0]) > _rho_max * self._n:
+        if self._N > 0 and abs(xmin[0]) > _rho_max * self._n:
             logger.error(("nsources > {0:7.2%} * {1:6d} selected events, "
                           "fit-value nsources = {2:8.1f}").format(
                               _rho_max, self._n, xmin[0]))
@@ -1313,7 +1322,7 @@ class PointSourceLLH(object):
 
         return
 
-    def weighted_sensitivity(self, src_dec, alpha, beta, inj, mc, **kwargs):
+    def weighted_sensitivity(self, src_ra, src_dec, alpha, beta, inj, mc, **kwargs):
         """Calculate the point source sensitivity for a given source
         hypothesis using weights.
 
@@ -1323,6 +1332,8 @@ class PointSourceLLH(object):
 
         Parameters
         ----------
+        src_ra : float
+            Source position(s)
         src_dec : float
             Source position(s)
         alpha : array-like (m, )
@@ -1401,9 +1412,9 @@ class PointSourceLLH(object):
 
                 n_inj = int(np.mean(trials["n_inj"])) if len(trials) > 0 else 0
                 while True:
-                    n_inj, sample = inj.sample(n_inj + 1, poisson=False).next()
+                    n_inj, sample = inj.sample(src_ra, n_inj + 1, poisson=False).next()
 
-                    TS_i, xmin_i = self.fit_source(np.pi, src_dec,
+                    TS_i, xmin_i = self.fit_source(src_ra, src_dec,
                                                    inject=sample,
                                                    scramble=True)
 
@@ -1432,8 +1443,8 @@ class PointSourceLLH(object):
 
                 # do trials around active region
                 trials = np.append(trials,
-                                   self.do_trials(src_dec, n_iter=n_iter,
-                                                  mu=inj.sample(mu_eff),
+                                   self.do_trials(src_ra, src_dec, n_iter=n_iter,
+                                                  mu=inj.sample(src_ra, mu_eff),
                                                   **kwargs))
 
 
@@ -1496,7 +1507,7 @@ class PointSourceLLH(object):
 
                 # do trials with best estimate
                 trials = np.append(trials, self.do_trials(
-                    src_dec, mu=inj.sample(mu_eff), n_iter=n_iter, **kwargs))
+                    src_ra, src_dec, mu=inj.sample(src_ra, mu_eff), n_iter=n_iter, **kwargs))
 
                 sys.stdout.flush()
 
@@ -1549,7 +1560,7 @@ class PointSourceLLH(object):
                           "TS value for alpha = {0:7.2%}".format(alpha_i))
 
                     trials = np.append(trials,
-                                       self.do_trials(src_dec,
+                                       self.do_trials(src_ra, src_dec,
                                                       n_iter=n_bckg,
                                                       **kwargs))
 
@@ -1780,8 +1791,6 @@ class MultiPointSourceLLH(PointSourceLLH):
         # init empty dictionary containers
         self._enum = dict()
         self._sams = dict()
-        self._nuhist = dict()
-        self._nuspline = dict()
 
         return
 

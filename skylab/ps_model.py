@@ -310,7 +310,7 @@ class ClassicLLH(NullModel):
                 or np.sin(dec) > self.sinDec_bins[-1]):
             return 0., None
 
-        return self._spl_effA(dec), None
+        return self._spl_effA(np.sin(dec)), None
 
     def reset(self):
         r"""Classic likelihood does only depend on spatial part, needs no
@@ -338,9 +338,13 @@ class ClassicLLH(NullModel):
 
         """
         cos_ev = np.sqrt(1. - ev["sinDec"]**2)
-        dist = np.arccos(np.cos(src_ra - ev["ra"])
+        cosDist = (np.cos(src_ra - ev["ra"])
                             * np.cos(src_dec) * cos_ev
-                         + np.sin(src_dec) * ev["sinDec"])
+                          + np.sin(src_dec) * ev["sinDec"])
+
+        # handle possible floating precision errors
+        cosDist[np.isclose(cosDist, 1.) & (cosDist > 1)] = 1.
+        dist = np.arccos(cosDist)
 
         return (1./2./np.pi/ev["sigma"]**2
                 * np.exp(-dist**2 / 2. / ev["sigma"]**2))
@@ -837,6 +841,34 @@ class EnergyDistLLH(PowerLawLLH):
         super(EnergyDistLLH, self).__init__(["logE", "dist"],
                                             twodim_bins, range=twodim_range,
                                             **kwargs)
+
+        return
+
+
+class EnergyLLHfixed(EnergyLLH):
+    r"""Energy Likelihood that uses external data to create the splines, and
+    splines are not evaluated using the data given by call method.
+
+    """
+    def __init__(self, exp, mc, livetime, **kwargs):
+        r"""Constructor
+
+        """
+
+        # call constructor of super-class, settings are set.
+        super(EnergyLLHfixed, self).__init__(**kwargs)
+
+        # do the call already
+        super(EnergyLLHfixed, self).__call__(exp, mc, livetime)
+
+        return
+
+    def __call__(self, exp, mc, livetime):
+        r"""Call function not used here
+
+        """
+
+        print("EnergyLLH with FIXED splines used here, call has no effect")
 
         return
 
