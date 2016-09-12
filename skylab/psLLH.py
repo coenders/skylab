@@ -1876,6 +1876,7 @@ class MultiPointSourceLLH(PointSourceLLH):
             sam._select_events(src_ra, src_dec, inject=inj_i, **kwargs)
 
         self._n = sum([sam._n for sam in self._sams.itervalues()])
+        self._N = sum([sam._N for sam in self._sams.itervalues()])
 
         return
 
