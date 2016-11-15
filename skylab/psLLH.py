@@ -393,7 +393,7 @@ class PointSourceLLH(object):
         self.reset()
 
         # get the zenith band with correct boundaries
-        dec = (np.pi - 2. * self.delta_ang) / np.pi * src_dec
+        dec = src_dec#(np.pi - 2. * self.delta_ang) / np.pi * src_dec
         min_dec = max(-np.pi / 2., dec - self.delta_ang)
         max_dec = min(np.pi / 2., dec + self.delta_ang)
 
