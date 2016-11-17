@@ -1186,17 +1186,20 @@ class PointSourceLLH(object):
                                 **kwargs)
 
         # set up mindict to enter while, exit if fit looks nice
-        i = 0
-        min_dict = dict(warnflag=0, task="FACTR")
-        while min_dict["warnflag"] == 0 and "FACTR" in min_dict["task"]:
+        i = 1
+        while min_dict["warnflag"] == 2 and "FACTR" in min_dict["task"]:
+            if i > 100:
+                raise RuntimeError("Did not manage good fit")
+
+            pars[0] = self.random.uniform(0., 2. * pars[0])
+
             # no stop due to gradient
             xmin, fmin, min_dict = scipy.optimize.fmin_l_bfgs_b(
                                     _llh, pars,
                                     bounds=self.par_bounds,
                                     **kwargs)
-            pars[0] = self.random.uniform(0., 2. * pars[0])
-            if i > 100:
-                raise RuntimeError("Did not manage good fit")
+
+            i += 1
 
         if fmin > 0 and (self.par_bounds[0][0] <= 0
                          and self.par_bounds[0][1] >= 0):
