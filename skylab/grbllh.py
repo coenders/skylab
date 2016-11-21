@@ -134,7 +134,7 @@ class BaseLLH(object):
         src_dec : float
             Declination of source position
         scramble : Optional[bool]
-            Scramble events prior to selection.
+            Scramble events in right ascension prior to selection.
         inject : Optional[ndarray]
             Structured array containing additional events to append to
             selection
@@ -148,6 +148,10 @@ class BaseLLH(object):
             statistic ``-sign(ns)*llh``
         pbest : Dict[str, float]
             Parameters minimizing the negative log-likelihood function
+
+        Warnings
+        --------
+        Only set `scramble` to `False` if you want to unblind the data.
 
         """
         # Set all weights once for this source location, if not already cached.
@@ -635,7 +639,7 @@ class GrbLLH(BaseLLH):
 
         Warnings
         --------
-        Only set `scramble` to `True` if you want to unblind the data.
+        Only set `scramble` to `False` if you want to unblind the data.
 
         """
         if scramble:
