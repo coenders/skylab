@@ -608,15 +608,12 @@ class GrbLLH(BaseLLH):
 
         super(GrbLLH, self).__init__(self, **kwargs)
 
-    def _select_events(self, src_ra, src_dec, scramble=True, inject=None):
+    def _select_events(self, src_ra=None, src_dec=None, scramble=True,
+                       inject=None):
         """Select events for log-likelihood evaluation.
 
         Parameters
         ----------
-        src_ra : float
-            Right ascension of source position
-        src_dec : float
-            Declination of source position
         scramble : Optional[bool]
             If `scramble` is `True`, `nbackground` (plus Poisson
             fluctuations) events are selected from the off-source time
@@ -630,6 +627,11 @@ class GrbLLH(BaseLLH):
         -------
         int:
             Number of selected events
+
+        Note
+        ----
+        In the current implementation, the selection depends only on the
+        on-source time range. Hence, `src_ra` and `src_dec` are ignored.
 
         Warnings
         --------
