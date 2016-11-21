@@ -26,7 +26,7 @@ class BaseLLH(object):
     """Base class for unbinned point source log-likelihood functions
 
     Derived classes must implement the methods `_select_events`, `llh`
-    and the property `size`.
+    and the properties `params`, `par_seeds`, `par_bounds` and `size`.
 
     Attributes
     ----------
@@ -79,29 +79,38 @@ class BaseLLH(object):
         pass
 
     @abc.abstractmethod
-    def llh(self, **fit_pars):
-        """Evaluate log-likelihood function given the parameter values
-        specified in `fit_pars`.
+    def llh(self, nsources, **others):
+        """Evaluate log-likelihood function given the source strength
+        `nsources` and the parameter values specified in `others`.
+
+        Parameters
+        ----------
+        nsources : float
+            Source strength
+        \*\*others
+            Other parameters log-likelihood function depends on
 
         Returns
         -------
         ts : float
             Log-likelihood for the given parameter values
         grad : ndarray
-            Gradient for each parameter specified in `fit_pars`
+            Gradient for each parameter
 
         """
         pass
 
-    @property
+    @abc.abstractproperty
     def params(self):
-        """List[str]: Log-likelihood parameter names
+        """List[str]: Log-likelihood parameter names; the default
+        implementation returns ``nsources``.
         """
         return ["nsources"]
 
-    @property
+    @abc.abstractproperty
     def par_seeds(self):
-        """ndarray: Log-likelihood parameter seeds
+        """ndarray: Log-likelihood parameter seeds; the default
+        implementation returns the seed for the source strength.
         """
         if self._nselected > 0:
             ns = min(self.nsource, self.nsource_rho * self._nselected)
@@ -110,9 +119,10 @@ class BaseLLH(object):
 
         return np.atleast_1d(ns)
 
-    @property
+    @abc.abstractproperty
     def par_bounds(self):
-        """ndarray: Lower and upper log-likelihood parameter bounds
+        """ndarray: Lower and upper log-likelihood parameter bounds; the
+        default implementation returns `nsource_bounds`.
         """
         return np.atleast_1d(self.nsource_bounds)
 
@@ -354,8 +364,8 @@ class BaseLLH(object):
                 for i in range(n_iter)
                 ]
 
-        dtype = [("n_inj", np.int), ("TS", np.float)] +\
-            [(p, np.float) for p in self.params]
+        dtype = [("n_inj", np.int), ("TS", np.float)]
+        dtype.extend((p, np.float) for p in self.params)
 
         trials = np.empty((n_iter, ), dtype=dtype)
 
@@ -672,15 +682,13 @@ class GrbLLH(BaseLLH):
 
         return self._events.size
 
-    def llh(self, **fit_pars):
+    def llh(self, nsources, **others):
         SoB = self._signal / self._events["B"]
 
-        weights, wgrad = self.llh_model.weight(self._events, **fit_pars)
+        weights, wgrad = self.llh_model.weight(self._events, **others)
         x = SoB * weights
 
-        nsources = fit_pars["nsources"]
         ts = 2. * (-nsources + np.log1p(nsources / self.nbackground * x).sum())
-
         nsgrad = -1. + (x / (self.nbackground + x * nsources)).sum()
 
         if wgrad is not None:
@@ -713,6 +721,8 @@ class GrbLLH(BaseLLH):
 
     @property
     def par_bounds(self):
+        """ndarray: Lower and upper log-likelihood parameter bounds
+        """
         bounds = [
             self.llh_model.params[p][1] for p in self.llh_model.params[1:]
             ]
@@ -720,4 +730,6 @@ class GrbLLH(BaseLLH):
 
     @property
     def size(self):
+        """int: Total number of events contained in `data`
+        """
         return self.data["on"].size + self.data["off"].size
