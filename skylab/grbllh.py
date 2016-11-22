@@ -14,10 +14,10 @@ from . import utils
 
 
 def fs(args):
-    llh, src_ra, src_dec, inject, scramble, kwargs, seed = args
+    llh, src_ra, src_dec, scramble, inject, kwargs, seed = args
 
     if scramble:
-        llh.random.RandomState(seed)
+        llh.random = np.random.RandomState(seed)
 
     return llh.fit_source(src_ra, src_dec, scramble, inject, **kwargs)
 
@@ -28,6 +28,11 @@ class BaseLLH(object):
     Derived classes must implement the methods `_select_events`, `llh`
     and the properties `params`, `par_seeds`, `par_bounds` and `size`.
 
+    Parameters
+    ----------
+    seed : Optional[int]
+        Random seed initializing the pseudo-random number generator.
+
     Attributes
     ----------
     nsource : float
@@ -37,6 +42,8 @@ class BaseLLH(object):
         seed for the source strength parameter.
     nsource_bounds : Tuple[float]
         Lower and upper bound for source strength parameter
+    random : RandomState
+        Pseudo-random number generator
 
     """
     __metaclass__ = abc.ABCMeta
@@ -45,11 +52,12 @@ class BaseLLH(object):
     _rho_max = 0.95
     _ub_perc = 1.
 
-    def __init__(self, nsource=15., nsource_rho=0.9, nsource_bounds=(0., 1e3)):
+    def __init__(self, nsource=15., nsource_rho=0.9, nsource_bounds=(0., 1e3),
+                 seed=None):
         self.nsource = nsource
         self.nsource_rho = nsource_rho
         self.nsource_bounds = nsource_bounds
-        self.random = np.random.RandomState()
+        self.random = np.random.RandomState(seed)
         self._nselected = 0
         self._src_ra = np.nan
         self._src_dec = np.nan
@@ -274,6 +282,8 @@ class BaseLLH(object):
             if (np.fabs(x[0] - self._src_ra) > 0. or
                     np.fabs(x[1] - self._src_dec) > 0.):
                 self._nselected = self._select_events(x[0], x[1])
+                self._src_ra = x[0]
+                self._src_dec = x[1]
 
             params = dict(zip(self.params, x[2:]))
             func, grad = self.llh(**params)
@@ -340,7 +350,7 @@ class BaseLLH(object):
 
         """
         if mu_gen is None:
-            mu_gen = itertools.repeat(0, None)
+            mu_gen = itertools.repeat((0, None))
 
         inject = [mu_gen.next() for i in range(n_iter)]
 
@@ -348,11 +358,11 @@ class BaseLLH(object):
         # multi-processing, each process needs its own sampling seed.
         if ncpu > 1 and n_iter > ncpu and ncpu <= multiprocessing.cpu_count():
             args = [(
-                self, src_ra, src_dec, True, inject[i][1], kwargs.items(),
+                self, src_ra, src_dec, True, inject[i][1], kwargs,
                 self.random.randint(2**32)) for i in range(n_iter)
                 ]
 
-            pool = multiprocessing.Pool(self.ncpu)
+            pool = multiprocessing.Pool(ncpu)
             results = pool.map(fs, args)
 
             pool.close()
@@ -514,7 +524,7 @@ class BaseLLH(object):
         mins, secs = divmod(stop - start, 60)
         hours, mins = divmod(mins, 60)
 
-        print("Finished after {0:3d}h {1:2d}' {2:4.2f}''\n"
+        print("Finished after {0:3d}h {1:2d}' {2:4.2f}''.\n"
               "\tInjected: {3:6.2f}\n"
               "\tFlux    : {4:.2e}\n"
               "\tTrials  : {5:6d}\n"
@@ -524,9 +534,10 @@ class BaseLLH(object):
 
         sys.stdout.flush()
 
-        weights = utils.poisson_weight(trials["n_inj"], flux)
+        # weights = utils.poisson_weight(trials["n_inj"], flux)
 
-        return mu, flux, weights, trials
+        # return mu, flux, weights, trials
+        return mu, trials
 
     def _active_region(self, src_ra, src_dec, ts, beta, inj, n_iter, trials,
                        **kwargs):
@@ -620,7 +631,7 @@ class GrbLLH(BaseLLH):
             self.livetime["on"] / self.livetime["off"] * self.data["off"].size
             )
 
-        super(GrbLLH, self).__init__(self, **kwargs)
+        super(GrbLLH, self).__init__(**kwargs)
 
     def _select_events(self, src_ra=None, src_dec=None, scramble=True,
                        inject=None):
@@ -714,18 +725,14 @@ class GrbLLH(BaseLLH):
     def par_seeds(self):
         """ndarray: Log-likelihood parameter seeds
         """
-        seeds = [
-            self.llh_model.params[p][0] for p in self.llh_model.params[1:]
-            ]
+        seeds = [self.llh_model.params[p][0] for p in self.params[1:]]
         return np.hstack((super(GrbLLH, self).par_seeds, seeds))
 
     @property
     def par_bounds(self):
         """ndarray: Lower and upper log-likelihood parameter bounds
         """
-        bounds = [
-            self.llh_model.params[p][1] for p in self.llh_model.params[1:]
-            ]
+        bounds = [self.llh_model.params[p][1] for p in self.params[1:]]
         return np.vstack((super(GrbLLH, self).par_bounds, bounds))
 
     @property
