@@ -459,7 +459,7 @@ class BaseLLH(object):
                 not np.any(trials["TS"][trials["n_inj"] > 0] > 2.*ts)):
 
             trials = self._active_region(
-                ts, beta, inj, n_iter, trials, **kwargs)
+                src_ra, src_dec, ts, beta, inj, n_iter, trials, **kwargs)
 
         # Calculate number of injected events needed so that beta percent of
         # the trials have a test statistic larger than ts. Fit closest point
