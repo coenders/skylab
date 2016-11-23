@@ -479,10 +479,10 @@ class BaseLLH(object):
                   "{1:5.1f}.".format(*bounds))
 
             def residual(n):
-                return np.log10(utils.poisson_percentile(
-                    n, trials["n_inj"], trials["TS"], ts)[0] - beta)**2
+                return np.log10((utils.poisson_percentile(
+                    n, trials["n_inj"], trials["TS"], ts)[0] - beta))**2
 
-            seed = np.argmin(residual(n) for n in range(bounds[-1]))
+            seed = np.argmin(residual(n) for n in np.arange(bounds[-1]))
 
             xmin, fmin, success = scipy.optimize.fmin_l_bfgs_b(
                 residual, [seed], bounds=[bounds], approx_grad=True)
@@ -578,7 +578,7 @@ class BaseLLH(object):
             residuals = mts - ts
 
             stop = (
-                np.count_zonzero(residuals > 0.)/len(residuals) > beta or
+                np.count_nonzero(residuals > 0.)/len(residuals) > beta or
                 np.all(residuals > 0.)
                 )
 
@@ -691,7 +691,7 @@ class GrbLLH(BaseLLH):
                 inject = inject[np.logical_not(remove)]
 
             inject = numpy.lib.recfunctions.append_fields(
-                inject, names="B", data=self.llh_model.backgkround(inject),
+                inject, names="B", data=self.llh_model.background(inject),
                 usemask=False)
 
             self._events = np.append(self._events, inject)
