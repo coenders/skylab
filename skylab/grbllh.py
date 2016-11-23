@@ -173,7 +173,7 @@ class BaseLLH(object):
 
         """
         # Set all weights once for this source location, if not already cached.
-        self._n_selected = self._select_events(
+        self._nselected = self._select_events(
             src_ra, src_dec, scramble, inject)
 
         if self.size < 1:
@@ -278,7 +278,7 @@ class BaseLLH(object):
 
             """
             # If the minimizer is testing a new position, different events have
-            # to be selected.
+            # to be selected; cache position.
             if (np.fabs(x[0] - self._src_ra) > 0. or
                     np.fabs(x[1] - self._src_dec) > 0.):
                 self._nselected = self._select_events(x[0], x[1])
@@ -317,6 +317,10 @@ class BaseLLH(object):
 
         # Separate over and under fluctuations.
         fmin *= -np.sign(pbest["nsources"])
+
+        # Clear cache.
+        self._src_ra = np.nan
+        self._src_dec = np.nan
 
         return fmin, pbest
 
@@ -607,7 +611,7 @@ class GrbLLH(BaseLLH):
     data : Dict[str, ndarray]
         Experimental data in ``on`` and ``off``-source time range
     livetime : Dict[str, float]
-        On and off-source time range
+        On and off-source time range in days
     llh_model : NullModel
         Likelihood model, derived from `ps_model.NullModel`
     nbackground : float
@@ -663,6 +667,10 @@ class GrbLLH(BaseLLH):
         Only set `scramble` to `False` if you want to unblind the data.
 
         """
+        # We will chose new events, so it is time to clean the likelihood
+        # model's cache.
+        self.llh_model.reset()
+
         if scramble:
             N = self.random.poisson(self.nbackground)
 
@@ -689,7 +697,6 @@ class GrbLLH(BaseLLH):
             self._events = np.append(self._events, inject)
 
         self._signal = self.llh_model.signal(src_ra, src_dec, self._events)
-        self.llh_model.reset()
 
         return self._events.size
 
