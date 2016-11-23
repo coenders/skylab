@@ -406,10 +406,10 @@ class BaseLLH(object):
             Right ascension of source position
         src_dec : float
             Declination of source position
-        ts : float
+        ts : array_like
             Test statistic that corresponds to the type I error with
             respect to the background test statics distribution
-        beta : float
+        beta : array_like
             Fraction of signal trials with a test static larger than
             `ts`
         inj : Injector
@@ -431,26 +431,40 @@ class BaseLLH(object):
         mu : int
             Number of injected signal events to fulfill sensitivity
             criterion
-        flux : float
-            Sensitivity flux corresponding to `mu`
-        weigths : ndarray
-            Weight trials to a Poisson distribution with a mean of
-            `flux`.
         trials : ndarray
             Structured array containing previous and all newly generated
             trials
 
         """
-        print("Estimate sensitivity for declination {0:5.1f} deg.\n"
-              "\tTS    = {1:6.2f}\n"
-              "\tbeta  = {2:7.2%}\n".format(src_dec, ts, beta))
+        # Let NumPy handle the broadcasting of ts and beta.
+        broadcast = numpy.broadcast(ts, beta)
 
         if trials is None:
             dtype = [("n_inj", np.int), ("TS", np.float)]
             dtype.extend((p, np.float) for p in self.params)
             trials = np.empty((0, ), dtype=dtype)
 
+        print("Estimate sensitivity for declination {0:5.1f} deg.".format(
+              np.rad2deg(src_dec)))
+
+        values = []
+        for ts, beta in broadcast:
+            mu, trials = self._sensitivity(
+                src_ra, src_dec, ts, beta, inj, n_iter, eps, trials, **kwargs)
+
+            values.append(mu)
+
+        mu = numpy.empty(broadcast.shape)
+        mu.flat = values
+
+        return mu, trials
+
+    def _sensitivity(self, src_ra, src_dec, ts, beta, inj, n_iter, eps, trials,
+                     **kwargs):
         start = time.time()
+
+        print("\tTS    = {0:6.2f}\n"
+              "\tbeta  = {1:7.2%}\n".format(ts, beta))
 
         # If no events have been injected, do a quick an estimation of active
         # region by doing a few trials.
@@ -522,25 +536,20 @@ class BaseLLH(object):
 
             sys.stdout.flush()
 
-        flux = inj.mu2flux(mu)
-
         stop = time.time()
         mins, secs = divmod(stop - start, 60)
         hours, mins = divmod(mins, 60)
 
-        print("Finished after {0:3d}h {1:2d}' {2:4.2f}''.\n"
+        print("Finished after {0:3.0f}h {1:2.0f}' {2:4.2f}''.\n"
               "\tInjected: {3:6.2f}\n"
               "\tFlux    : {4:.2e}\n"
               "\tTrials  : {5:6d}\n"
               "\tTime    : {6:6.2f} trial(s) / sec\n".format(
-                  int(hours), int(mins), secs, mu, flux, len(trials),
+                  hours, mins, secs, mu, inj.mu2flux(mu), len(trials),
                   len(trials) / (stop - start)))
 
         sys.stdout.flush()
 
-        # weights = utils.poisson_weight(trials["n_inj"], flux)
-
-        # return mu, flux, weights, trials
         return mu, trials
 
     def _active_region(self, src_ra, src_dec, ts, beta, inj, n_iter, trials,
