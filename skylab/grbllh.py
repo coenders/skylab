@@ -80,7 +80,7 @@ class BaseLLH(object):
 
         Returns
         -------
-        int:
+        int
             Number of selected events
 
         """
@@ -167,6 +167,14 @@ class BaseLLH(object):
         pbest : Dict[str, float]
             Parameters minimizing the negative log-likelihood function
 
+        Raises
+        ------
+        RuntimeError
+            The minimization is repeated with different random seeds
+            for the source strength `nsources` until an accurate result
+            is obtained. The error is raised after 100 unsuccessful
+            minimizations.
+
         Warnings
         --------
         Only set `scramble` to `False` if you want to unblind the data.
@@ -210,7 +218,7 @@ class BaseLLH(object):
 
         while success["warnflag"] == 2 and "FACTR" in success["task"]:
             if niterations > 100:
-                raise RuntimeError("Did not manage good fit.")
+                raise RuntimeError("Did not manage a good fit.")
 
             params[0] = self.random.uniform(0., 2.*params[0])
 
@@ -347,7 +355,7 @@ class BaseLLH(object):
 
         Returns
         -------
-        ndarray:
+        ndarray
             Structured array containing number of injected events
             ``n_inj``, test statistic ``TS`` and best-fit values for
             `params` per trial
@@ -428,7 +436,7 @@ class BaseLLH(object):
 
         Returns
         -------
-        mu : int
+        mu : ndarray
             Number of injected signal events to fulfill sensitivity
             criterion
         trials : ndarray
@@ -494,7 +502,7 @@ class BaseLLH(object):
 
             def residual(n):
                 return np.log10((utils.poisson_percentile(
-                    n, trials["n_inj"], trials["TS"], ts)[0] - beta))**2
+                    n, trials["n_inj"], trials["TS"], ts)[0] - beta)**2)
 
             seed = np.argmin(residual(n) for n in np.arange(bounds[-1]))
 
@@ -663,7 +671,7 @@ class GrbLLH(BaseLLH):
 
         Returns
         -------
-        int:
+        int
             Number of selected events
 
         Note
