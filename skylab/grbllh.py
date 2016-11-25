@@ -215,7 +215,6 @@ class BaseLLH(object):
             llh, params, bounds=self.par_bounds, **kwargs)
 
         niterations = 1
-
         while success["warnflag"] == 2 and "FACTR" in success["task"]:
             if niterations > 100:
                 raise RuntimeError("Did not manage a good fit.")
@@ -452,7 +451,7 @@ class BaseLLH(object):
             dtype.extend((p, np.float) for p in self.params)
             trials = np.empty((0, ), dtype=dtype)
 
-        print("Estimate sensitivity for declination {0:5.1f} deg.".format(
+        print("Estimate sensitivity for declination {0:5.2f}deg.".format(
               np.rad2deg(src_dec)))
 
         values = []
@@ -488,6 +487,7 @@ class BaseLLH(object):
         # to beta value; use existing scrambles to determine a seed for the
         # minimization; restrict fit to region where sampled before.
         stop = False
+        niterations = 1
         while not stop:
             bounds = np.percentile(
                 trials["n_inj"][trials["n_inj"] > 0],
@@ -497,7 +497,7 @@ class BaseLLH(object):
                 bounds[0] = np.count_nonzero(trials["n_inj"] == 1) /\
                     np.sum(trials["n_inj"] < 2)
 
-            print("\t\tEstimate sensitivity in region {0:5.1f} to "
+            print("\tEstimate sensitivity in region {0:5.1f} to "
                   "{1:5.1f}.".format(*bounds))
 
             def residual(n):
@@ -519,28 +519,30 @@ class BaseLLH(object):
                   "({1:7.2%} +/- {2:8.3%})".format(mu, b, b_err))
 
             # If precision is high enough and fit did converge, the wanted
-            # value is reached and we can stop the trial computation after
-            # this iteration.
+            # value is reached and we can stop the trial computation after this
+            # iteration. Otherwise, do more trials with best estimate for mu.
             stop = (
                 b_err < eps and
                 mu > bounds[0] and mu < bounds[-1] and
                 np.fabs(b - beta) < eps
                 )
 
-            # To avoid a spiral with too few events, we want only half of
-            # all events to be background scrambles after iterations.
-            p_bckg = np.sum(trials["n_inj"] == 0) / len(trials)
-            mu_min = np.log(1. / (1. - p_bckg))
-            mu = np.amax([mu, mu_min])
+            if not stop or niterations == 1:
+                # To avoid a spiral with too few events, we want only half of
+                # all events to be background scrambles after iterations.
+                p_bckg = np.sum(trials["n_inj"] == 0) / len(trials)
+                mu_min = np.log(1. / (1. - p_bckg))
+                mu = np.amax([mu, mu_min])
 
-            print("\t\tDo {0:6d} trials with mu = {1:6.2f} events.".format(
-                  n_iter, mu))
+                print("\tDo {0:6d} trials with mu = {1:6.2f} events.".format(
+                      n_iter, mu))
 
-            # Do trials with best estimate.
-            trials = np.append(
-                trials, self.do_trials(
-                    src_ra, src_dec, n_iter,
-                    mu_gen=inj.sample(src_ra, mu), **kwargs))
+                trials = np.append(
+                    trials, self.do_trials(
+                        src_ra, src_dec, n_iter,
+                        mu_gen=inj.sample(src_ra, mu), **kwargs))
+
+            niterations += 1
 
             sys.stdout.flush()
 
@@ -548,11 +550,11 @@ class BaseLLH(object):
         mins, secs = divmod(stop - start, 60)
         hours, mins = divmod(mins, 60)
 
-        print("Finished after {0:3.0f}h {1:2.0f}' {2:4.2f}''.\n"
-              "\tInjected: {3:6.2f}\n"
-              "\tFlux    : {4:.2e}\n"
-              "\tTrials  : {5:6d}\n"
-              "\tTime    : {6:6.2f} trial(s) / sec\n".format(
+        print("\tFinished after {0:3.0f}h {1:2.0f}' {2:4.2f}''.\n"
+              "\t\tInjected: {3:6.2f}\n"
+              "\t\tFlux    : {4:.2e}\n"
+              "\t\tTrials  : {5:6d}\n"
+              "\t\tTime    : {6:6.2f} trial(s) / sec\n".format(
                   hours, mins, secs, mu, inj.mu2flux(mu), len(trials),
                   len(trials) / (stop - start)))
 
