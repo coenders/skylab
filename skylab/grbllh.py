@@ -504,7 +504,7 @@ class BaseLLH(object):
                 return np.log10((utils.poisson_percentile(
                     n, trials["n_inj"], trials["TS"], ts)[0] - beta)**2)
 
-            seed = np.argmin(residual(n) for n in np.arange(bounds[-1]))
+            seed = np.argmin([residual(n) for n in np.arange(bounds[-1])])
 
             xmin, fmin, success = scipy.optimize.fmin_l_bfgs_b(
                 residual, [seed], bounds=[bounds], approx_grad=True)
