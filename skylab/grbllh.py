@@ -161,7 +161,8 @@ class BaseLLH(object):
             Structured array containing additional events to append to
             selection
         \*\*kwargs
-            Parameters passed to the L-BFGS-B minimizer
+            Seeds for parameters given in `params` and parameters passed
+            to the L-BFGS-B minimizer
 
         Returns
         -------
