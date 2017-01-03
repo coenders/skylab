@@ -44,6 +44,9 @@ class BaseLLH(object):
         Lower and upper bound for source strength parameter
     random : RandomState
         Pseudo-random number generator
+    ncpu : int
+        Number of processing units; a number larger than 1 enables
+        multi-processing support.
 
     """
     __metaclass__ = abc.ABCMeta
@@ -53,11 +56,12 @@ class BaseLLH(object):
     _ub_perc = 1.
 
     def __init__(self, nsource=15., nsource_rho=0.9, nsource_bounds=(0., 1e3),
-                 seed=None):
+                 seed=None, ncpu=1):
         self.nsource = nsource
         self.nsource_rho = nsource_rho
         self.nsource_bounds = nsource_bounds
         self.random = np.random.RandomState(seed)
+        self.ncpu = ncpu
         self._nselected = 0
         self._src_ra = np.nan
         self._src_dec = np.nan
@@ -331,7 +335,7 @@ class BaseLLH(object):
 
         return fmin, pbest
 
-    def do_trials(self, src_ra, src_dec, n_iter=int(1e5), mu_gen=None, ncpu=1,
+    def do_trials(self, src_ra, src_dec, n_iter=int(1e5), mu_gen=None,
                   **kwargs):
         """Create trials of scrambled event maps to estimate the test
         statistic distribution.
@@ -346,9 +350,6 @@ class BaseLLH(object):
             Number of trials to create
         mu_gen : Optional[Injector]
             Inject additional events into the scrambled map.
-        ncpu : int
-            Number of processing units; a number larger than 1 enables
-            multi-processing support.
         \*\*kwargs
             Parameters passed to `fit_source`
 
@@ -367,13 +368,14 @@ class BaseLLH(object):
 
         # Minimize negative log-likelihood function for every trial. In case of
         # multi-processing, each process needs its own sampling seed.
-        if ncpu > 1 and n_iter > ncpu and ncpu <= multiprocessing.cpu_count():
+        if (self.ncpu > 1 and n_iter > self.ncpu and
+                self.ncpu <= multiprocessing.cpu_count()):
             args = [(
                 self, src_ra, src_dec, True, inject[i][1], kwargs,
                 self.random.randint(2**32)) for i in range(n_iter)
                 ]
 
-            pool = multiprocessing.Pool(ncpu)
+            pool = multiprocessing.Pool(self.ncpu)
             results = pool.map(fs, args)
 
             pool.close()
