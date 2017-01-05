@@ -14,6 +14,10 @@ import scipy.optimize
 from . import utils
 
 
+def _get_pvalue(ts, sindec=None):
+    return ts
+
+
 def fs(args):
     llh, src_ra, src_dec, scramble, inject, kwargs, seed = args
 
@@ -614,7 +618,8 @@ class BaseLLH(object):
 
         return trials
 
-    def window_scan(self, src_ra, src_dec, width, npoints=50, xmin=None):
+    def window_scan(self, src_ra, src_dec, width, npoints=50, xmin=None,
+                    pval=None):
         r"""Do a rectangular scan around source position.
 
         Parameters
@@ -630,6 +635,11 @@ class BaseLLH(object):
         xmin : Optional[Dict[str, float]]
             Seeds for parameters given in `params`; either one value or
             a HEALPy map per parameter.
+        pval : Optional[object]
+            Callable object that calculates the p-value given the test
+            statistic and optionally sine declination of the source
+            position; by default the p-value corresponds to the test
+            statistic.
 
         Returns
         -------
@@ -640,6 +650,9 @@ class BaseLLH(object):
             two-dimensional grid declination versus right ascension
 
         """
+        if pval is None:
+            pval = _get_pvalue
+
         # Create rectangular window.
         ra = np.linspace(-width/2., width/2., npoints)
         ra, dec = np.meshgrid(ra, ra)
@@ -734,23 +747,6 @@ class BaseLLH(object):
             results, names=["ra", "dec"], data=[ra, dec], usemask=False)
 
         return results.reshape((npoints, npoints))
-
-    @staticmethod
-    def pval(ts, sindec=None):
-        """Convert test statistic `ts` into p-value.
-
-        The default implementation simply returns `ts`; override method
-        for a different p-value definition.
-
-        Parameters
-        ----------
-        ts : array_like
-            Test statistic
-        sindec : Optional[array_like]
-            Sine declination of source positions
-
-        """
-        return ts
 
 
 class GRBLlh(BaseLLH):
