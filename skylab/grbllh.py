@@ -753,7 +753,7 @@ class BaseLLH(object):
         return ts
 
 
-class GrbLLH(BaseLLH):
+class GRBLlh(BaseLLH):
     """Log-likelihood function for gamma-ray burst analyses
 
     Parameters
@@ -794,7 +794,7 @@ class GrbLLH(BaseLLH):
             self.livetime["on"] / self.livetime["off"] * self.data["off"].size
             )
 
-        super(GrbLLH, self).__init__(**kwargs)
+        super(GRBLlh, self).__init__(**kwargs)
 
     def _select_events(self, src_ra=None, src_dec=None, scramble=True,
                        inject=None):
@@ -885,21 +885,21 @@ class GrbLLH(BaseLLH):
     def params(self):
         """List[str]: Log-likelihood parameter names
         """
-        return super(GrbLLH, self).params + self.llh_model.params.keys()
+        return super(GRBLlh, self).params + self.llh_model.params.keys()
 
     @property
     def par_seeds(self):
         """ndarray: Log-likelihood parameter seeds
         """
         seeds = [self.llh_model.params[p][0] for p in self.params[1:]]
-        return np.hstack((super(GrbLLH, self).par_seeds, seeds))
+        return np.hstack((super(GRBLlh, self).par_seeds, seeds))
 
     @property
     def par_bounds(self):
         """ndarray: Lower and upper log-likelihood parameter bounds
         """
         bounds = [self.llh_model.params[p][1] for p in self.params[1:]]
-        return np.vstack((super(GrbLLH, self).par_bounds, bounds))
+        return np.vstack((super(GRBLlh, self).par_bounds, bounds))
 
     @property
     def size(self):
