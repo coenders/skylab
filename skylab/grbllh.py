@@ -6,6 +6,7 @@ import multiprocessing
 import sys
 import time
 
+import healpy as hp
 import numpy as np
 import numpy.lib.recfunctions
 import scipy.optimize
@@ -51,6 +52,8 @@ class BaseLLH(object):
     """
     __metaclass__ = abc.ABCMeta
 
+    _b_eps = 0.9
+    _min_ns = 1.
     _pgtol = 1e-3
     _rho_max = 0.95
     _ub_perc = 1.
@@ -144,7 +147,7 @@ class BaseLLH(object):
         """
         pass
 
-    def fit_source(self, src_ra, src_dec, scramble=True, inject=None,
+    def fit_source(self, src_ra, src_dec, scramble=False, inject=None,
                    **kwargs):
         """Minimize the negative log-likelihood function at source
         position.
@@ -179,10 +182,6 @@ class BaseLLH(object):
             for the source strength `nsources` until an accurate result
             is obtained. The error is raised after 100 unsuccessful
             minimizations.
-
-        Warnings
-        --------
-        Only set `scramble` to `False` if you want to unblind the data.
 
         """
         # Set all weights once for this source location, if not already cached.
@@ -258,8 +257,8 @@ class BaseLLH(object):
         return fmin, pbest
 
     def fit_source_loc(self, src_ra, src_dec, size, seed, **kwargs):
-        """Minimize the negative log-likelihood function around
-        interesting position.
+        """Minimize the negative log-likelihood function around source
+        position.
 
         Parameters
         ----------
@@ -447,7 +446,7 @@ class BaseLLH(object):
 
         """
         # Let NumPy handle the broadcasting of ts and beta.
-        broadcast = numpy.broadcast(ts, beta)
+        broadcast = np.broadcast(ts, beta)
 
         if trials is None:
             dtype = [("n_inj", np.int), ("TS", np.float)]
@@ -464,7 +463,7 @@ class BaseLLH(object):
 
             values.append(mu)
 
-        mu = numpy.empty(broadcast.shape)
+        mu = np.empty(broadcast.shape)
         mu.flat = values
 
         return mu, trials
@@ -614,6 +613,144 @@ class BaseLLH(object):
                 mu_gen=inj.sample(src_ra, mu), **kwargs))
 
         return trials
+
+    def window_scan(self, src_ra, src_dec, width, npoints=50, xmin=None):
+        r"""Do a rectangular scan around source position.
+
+        Parameters
+        ----------
+        src_ra : float
+            Right ascension of source position
+        src_dec : float
+            Declination of source position
+        width : float
+            Window size
+        npoints : Optional[int]
+            Number of scan points per dimension
+        xmin : Optional[Dict[str, float]]
+            Seeds for parameters given in `params`; either one value or
+            a HEALPy map per parameter.
+
+        Returns
+        -------
+        ndarray
+            Structured array containing right ascension ``ra``,
+            declination ``dec``, test statistic ``TS``, p-value
+            ``pVal``, and best-fit values for `params` on the
+            two-dimensional grid declination versus right ascension
+
+        """
+        # Create rectangular window.
+        ra = np.linspace(-width/2., width/2., npoints)
+        ra, dec = np.meshgrid(ra, ra)
+
+        # Shift window to source location; adjust right ascension for curvature
+        # and periodicity.
+        dec += src_dec
+        ra = np.mod(ra/np.cos(dec) + src_ra - 2.*np.pi, 2.*np.pi)
+
+        ra = ra.ravel()
+        dec = dec.ravel()
+
+        # Create seeds for all scan points and tighten seed boundaries. If
+        # xmin consists of HEALPy maps, interpolate them.
+        dtype = [(p, np.float) for p in ["TS", "pVal"] + self.params]
+        seeds = np.empty_like(ra, dtype=dtype[2:])
+
+        if hasattr(xmin, "__getitem__"):
+            if hp.pixelfunc.isnpixok(len(xmin)):
+                zen = np.pi/2. - dec
+                for p in self.params:
+                    seeds[p] = hp.pixelfunc.get_interp_val(xmin[p], zen, ra)
+            else:
+                for p in self.params:
+                    seeds[p] = xmin[p] * np.ones_like(ra, dtype=np.float)
+        else:
+            seeds = np.zeros_like(seeds)
+
+        bounds = {
+            p: (
+                np.mean(b) - self._b_eps*np.diff(b)/2.,
+                np.mean(b) + self._b_eps*np.diff(b)/2.
+                )
+            if p != "nsources" else (0., np.inf)
+            for p, b in zip(self.params, self.par_bounds)
+            }
+
+        # Minimize negative log-likelihood function for scan point.
+        results = np.empty_like(seeds, dtype=dtype)
+        start = time.time()
+
+        for i in range(ra.size):
+            if dec[i] < -np.pi/2. or dec[i] > np.pi/2.:
+                for field in results.dtype.names:
+                    results[field][i] = np.nan
+
+                continue
+
+            # We can use neighboring completed scan points to select better
+            # seeds based on the maximum obtained p-value.
+            neighbors = []
+            if i % npoints > 0:
+                neighbors.append(i - 1)
+
+            if i > npoints - 1:
+                neighbors.append(i - npoints)
+                neighbors.append(i - npoints + 1)
+
+            if i % npoints > 0 and i > npoints - 1:
+                neighbors.append(i - npoints - 1)
+
+            neighbors = np.array(np.unique(neighbors), dtype=np.int)
+
+            if (len(neighbors) > 0 and
+                    np.any(results["nsources"][neighbors] > self._min_ns)):
+                index = neighbors[np.argmax(results["pVal"][neighbors])]
+                seed = results[self.params][index]
+            else:
+                seed = seeds[i]
+
+            if seed["nsources"] > self._min_ns:
+                seed = {
+                    p: seed[p] for p in seed.dtype.names
+                    if bounds[p][0] < seed[p] < bounds[p][1]
+                    }
+            else:
+                seed = {}
+
+            results["TS"][i], pbest = self.fit_source(ra[i], dec[i], **seed)
+            results["pVal"][i] = self.pval(results["TS"][i], np.sin(dec[i]))
+
+            for key in pbest:
+                results[key][i] = pbest[key]
+
+            stop = time.time()
+            mins, secs = divmod(stop - start, 60)
+
+            print("\t{0:7.2%} after {1:2.0f}' {2:4.1f}'' ({3:8d} of "
+                  "{4:8d})".format((i+1)/ra.size, mins, secs, i+1, ra.size))
+
+        results = numpy.lib.recfunctions.append_fields(
+            results, names=["ra", "dec"], data=[ra, dec], usemask=False)
+
+        return results.reshape((npoints, npoints))
+
+    @staticmethod
+    def pval(ts, sindec=None):
+        """Convert test statistic `ts` into p-value.
+
+        The default implementation simply returns `ts`; override method
+        for a different p-value definition.
+
+        Parameters
+        ----------
+        ts : array_like
+            Test statistic
+        sindec : Optional[array_like]
+            Sine declination of source positions
+
+        """
+        return ts
 
 
 class GrbLLH(BaseLLH):
