@@ -372,8 +372,7 @@ class BaseLLH(object):
                           np.rad2deg(hotspot["ra"]),
                           np.rad2deg(hotspot["dec"]),
                           hotspot["pVal"],
-                          hotspot["TS"])
-                  )
+                          hotspot["TS"]))
 
             print("\n".join(
                 "\t{0:10s} = {1:6.2f}".format(p, seed[p]) for p in seed))
@@ -400,8 +399,7 @@ class BaseLLH(object):
                       np.rad2deg(xmin["ra"]),
                       np.rad2deg(xmin["dec"]),
                       pvalue,
-                      fmin)
-                  )
+                      fmin))
 
             print("\n".join(
                 "\t{0:10s} = {1:6.2f}".format(p, xmin[p]) for p in seed))
@@ -481,13 +479,15 @@ class BaseLLH(object):
             kwargs.pop(p, s) for p, s in zip(self.params, self.par_seeds)
             ])
 
+        bounds = self.par_bounds
+
         # Minimize negative log-likelihood; repeat minimization with different
         # seeds for nsources until the fit looks nice. Do not more than 100
         # iterations.
         kwargs.setdefault("pgtol", self._pgtol)
 
         xmin, fmin, success = scipy.optimize.fmin_l_bfgs_b(
-            llh, params, bounds=self.par_bounds, **kwargs)
+            llh, params, bounds=bounds, **kwargs)
 
         niterations = 1
         while success["warnflag"] == 2 and "FACTR" in success["task"]:
@@ -497,28 +497,25 @@ class BaseLLH(object):
             params[0] = self.random.uniform(0., 2.*params[0])
 
             xmin, fmin, success = scipy.optimize.fmin_l_bfgs_b(
-                llh, params, bounds=self.par_bounds, **kwargs)
+                llh, params, bounds=bounds, **kwargs)
 
             niterations += 1
 
         # If the null-hypothesis is part of minimization, the fit should be
         # negative; log only if the distance is too large.
-        if fmin > 0. and (
-                self.par_bounds[0][0] <= 0. and self.par_bounds[0][1] >= 0.):
+        if fmin > 0. and (bounds[0][0] <= 0. and bounds[0][1] >= 0.):
             if abs(fmin) > kwargs["pgtol"]:
-                print(
-                    "Fitter returned positive value, force to be zero at "
-                    "null-hypothesis. Minimum found {0} with fmin "
-                    "{1}".format(xmin, fmin))
+                print("Fitter returned positive value, force to be zero at "
+                      "null-hypothesis. Minimum found {0} with fmin "
+                      "{1}".format(xmin, fmin))
 
             fmin = 0.
             xmin[0] = 0.
 
         if self.size > 0 and abs(xmin[0]) > self._rho_max * self._nselected:
-            print(
-                "nsources > {0:7.2%} * {1:6d} selected events, fit-value "
-                "nsources = {2:8.1f}".format(
-                    self._rho_max, self._nselected, xmin[0]))
+            print("nsources > {0:7.2%} * {1:6d} selected events, fit-value "
+                  "nsources = {2:8.1f}".format(
+                      self._rho_max, self._nselected, xmin[0]))
 
         pbest = dict(zip(self.params, xmin))
 
@@ -589,10 +586,9 @@ class BaseLLH(object):
             llh, params, bounds=bounds, approx_grad=True, **kwargs)
 
         if self.size > 0 and abs(xmin[0]) > self._rho_max * self._nselected:
-            print(
-                "nsources > {0:7.2%} * {1:6d} selected events, fit-value "
-                "nsources = {2:8.1f}".format(
-                    self._rho_max, self._nselected, xmin[0]))
+            print("nsources > {0:7.2%} * {1:6d} selected events, fit-value "
+                  "nsources = {2:8.1f}".format(
+                      self._rho_max, self._nselected, xmin[0]))
 
         pbest = dict(ra=xmin[0], dec=xmin[1])
         pbest.update(dict(zip(self.params, xmin[2:])))
@@ -688,7 +684,7 @@ class BaseLLH(object):
             Declination of source position
         ts : array_like
             Test statistic that corresponds to the type I error with
-            respect to the background test statics distribution
+            respect to the background test statistic distribution
         beta : array_like
             Fraction of signal trials with a test static larger than
             `ts`
