@@ -14,10 +14,6 @@ import scipy.optimize
 from . import utils
 
 
-def _get_pvalue(ts, sindec=None):
-    return ts
-
-
 def fs(args):
     llh, src_ra, src_dec, scramble, inject, kwargs, seed = args
 
@@ -914,7 +910,8 @@ class BaseLLH(object):
 
         """
         if pval is None:
-            pval = _get_pvalue
+            def pval(ts, sindec):
+                return ts
 
         # Create rectangular window.
         ra = np.linspace(-width/2., width/2., npoints)
