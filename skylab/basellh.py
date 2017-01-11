@@ -14,15 +14,6 @@ import scipy.optimize
 from . import utils
 
 
-def fs(args):
-    llh, src_ra, src_dec, scramble, inject, kwargs, seed = args
-
-    if scramble:
-        llh.random = np.random.RandomState(seed)
-
-    return llh.fit_source(src_ra, src_dec, scramble, inject, **kwargs)
-
-
 class BaseLLH(object):
     """Base class for unbinned point source log-likelihood functions
 
@@ -155,8 +146,8 @@ class BaseLLH(object):
         """
         return (-1., 1.)
 
-    def all_sky_scan(self, nside=128, follow_up=2, hemispheres=None,
-                     pval=None):
+    def all_sky_scan(self, nside=128, follow_up_factor=2, hemispheres=None,
+                     pVal=None):
         """Scan the entire sky for single point sources.
 
         Perform an all-sky scan. First calculation is done on a coarse
@@ -168,17 +159,18 @@ class BaseLLH(object):
         ----------
         nside : Optional[int]
             NSide value for initial HEALPy map; must be power of 2.
-        follow_up : Optional[int]
+        follow_up_factor : Optional[int]
             Controls the grid size of following scans,
-            ``nside *= 2**follow_up``.
+            ``nside *= 2**follow_up_factor``.
         hemispheres : Optional[Dict[str, Tuple[float]]]
             Declination boundaries in radian of northern and southern
             sky; by default, the horizon is at -5 degrees.
-        pval : Optional[Callable[[array_like, array_like], array_like]
-            Converts from test statistic and sine declination to a
-            p-value. The conversion must be monotonic increasing,
-            because follow-up scans focus on high values. The default
-            simply returns the test statistic.
+        pVal : Optional[Callable[[ndarray, ndarray], ndarray]
+            Calculates the p-value given the test statistic and
+            optionally sine declination of the source position; by
+            default the p-value is equal the test statistic. The p-value
+            must be monotonic increasing, because follow-up scans focus
+            on high values.
 
         Returns
         -------
@@ -190,12 +182,12 @@ class BaseLLH(object):
         --------
         In many cases, the test statistic is chi-square distributed.
 
-        >>> def pval(ts, sindec):
+        >>> def pVal(ts, sindec):
         ...     return -numpy.log10(0.5 * scipy.stats.chi2(2.).sf(ts))
 
         """
-        if pval is None:
-            def pval(ts, sindec):
+        if pVal is None:
+            def pVal(ts, sindec):
                 return ts
 
         if hemispheres is None:
@@ -227,7 +219,7 @@ class BaseLLH(object):
 
             # Interpolate previous scan results on new grid.
             ts = hp.get_interp_val(ts, theta, ra)
-            pvalue = pval(ts, np.sin(dec))
+            pvalue = pVal(ts, np.sin(dec))
 
             xmin = np.array(zip(
                 *[hp.get_interp_val(xmin[p], theta, ra) for p in self.params]),
@@ -273,7 +265,7 @@ class BaseLLH(object):
 
             # Here, the actual scan is done.
             ts, xmin = self._scan(ra[mask], dec[mask], ts, xmin, mask)
-            pvalue = pval(ts, np.sin(dec))
+            pvalue = pVal(ts, np.sin(dec))
 
             stop = time.time()
 
@@ -284,23 +276,23 @@ class BaseLLH(object):
                   int(hours), int(mins), secs))
 
             result = np.array(
-                zip(ra, dec, ts, pvalue),
-                dtype=[(f, np.float) for f in "ra", "dec", "TS", "pVal"])
+                zip(ra, dec, theta, ts, pvalue),
+                [(f, np.float) for f in "ra", "dec", "theta", "TS", "pVal"])
 
             result = numpy.lib.recfunctions.append_fields(
                 result, names=self.params, data=[xmin[p] for p in self.params],
                 dtypes=[np.float for p in self.params], usemask=False)
 
             yield result, self._hotspot(
-                    result, nside, hemispheres, drange, pval)
+                    result, nside, hemispheres, drange, pVal)
 
         print(67*"-")
         print("\tNext follow up: nside = {0:d} * 2**{1:d} = {2:d}".format(
-              nside, follow_up, nside * 2**follow_up))
+              nside, follow_up_factor, nside * 2**follow_up_factor))
 
         sys.stdout.flush()
 
-        nside *= 2**follow_up
+        nside *= 2**follow_up_factor
         niterations += 1
 
     def _scan(self, ra, dec, ts, xmin, mask):
@@ -322,7 +314,7 @@ class BaseLLH(object):
                 ]
 
             pool = multiprocessing.Pool(self.ncpu)
-            results = pool.map(fs, args)
+            results = pool.map(fit_source, args)
 
             pool.close()
             pool.join()
@@ -339,7 +331,7 @@ class BaseLLH(object):
 
         return ts, xmin
 
-    def _hotspot(self, scan, nside, hemispheres, drange, pval):
+    def _hotspot(self, scan, nside, hemispheres, drange, pVal):
         """Gather information about hottest spots in each hemisphere.
 
         """
@@ -387,7 +379,7 @@ class BaseLLH(object):
                 hotspot["ra"], hotspot["dec"], size=hp.nside2resol(nside),
                 seed=seed)
 
-            pvalue = np.asscalar(pval(fmin, np.sin(xmin["dec"])))
+            pvalue = np.asscalar(pVal(fmin, np.sin(xmin["dec"])))
 
             print("Refit location: ra = {0:6.1f}deg, dec = {1:6.1f}deg\n"
                   "\twith pVal  = {2:4.2f}\n"
@@ -598,7 +590,7 @@ class BaseLLH(object):
 
         return fmin, pbest
 
-    def do_trials(self, src_ra, src_dec, n_iter=int(1e5), mu_gen=None,
+    def do_trials(self, src_ra, src_dec, n_iter=int(1e5), mu=None,
                   **kwargs):
         """Create trials of scrambled event maps to estimate the test
         statistic distribution.
@@ -611,7 +603,7 @@ class BaseLLH(object):
             Declination of source position
         n_iter : Optional[int]
             Number of trials to create
-        mu_gen : Optional[Injector]
+        mu : Optional[Injector]
             Inject additional events into the scrambled map.
         \*\*kwargs
             Parameters passed to `fit_source`
@@ -624,10 +616,10 @@ class BaseLLH(object):
             `params` per trial
 
         """
-        if mu_gen is None:
-            mu_gen = itertools.repeat((0, None))
+        if mu is None:
+            mu = itertools.repeat((0, None))
 
-        inject = [mu_gen.next() for i in range(n_iter)]
+        inject = [mu.next() for i in range(n_iter)]
 
         # Minimize negative log-likelihood function for every trial. In case of
         # multi-processing, each process needs its own sampling seed.
@@ -639,11 +631,10 @@ class BaseLLH(object):
                 ]
 
             pool = multiprocessing.Pool(self.ncpu)
-            results = pool.map(fs, args)
+            results = pool.map(fit_source, args)
 
             pool.close()
             pool.join()
-            del pool
         else:
             results = [
                 self.fit_source(src_ra, src_dec, True, inject[i][1], **kwargs)
@@ -878,7 +869,7 @@ class BaseLLH(object):
         return trials
 
     def window_scan(self, src_ra, src_dec, width, npoints=50, xmin=None,
-                    pval=None):
+                    pVal=None):
         r"""Do a rectangular scan around source position.
 
         Parameters
@@ -894,50 +885,54 @@ class BaseLLH(object):
         xmin : Optional[Dict[str, float]]
             Seeds for parameters given in `params`; either one value or
             a HEALPy map per parameter.
-        pval : Optional[object]
-            Callable object that calculates the p-value given the test
-            statistic and optionally sine declination of the source
-            position; by default the p-value corresponds to the test
-            statistic.
+        pVal : Optional[Callable[[ndarray, ndarray], ndarray]]
+            Calculates the p-value given the test statistic and
+            optionally sine declination of the source position; by
+            default the p-value is equal the test statistic.
 
         Returns
         -------
         ndarray
-            Structured array containing right ascension ``ra``,
-            declination ``dec``, test statistic ``TS``, p-value
-            ``pVal``, and best-fit values for `params` on the
-            two-dimensional grid declination versus right ascension
+            Structured array describing effective right ascension ``ra``
+            corrected for curvature, right ascension ``x``, declination
+            ``dec``, test statistic ``TS``, p-value ``pVal``, and
+            best-fit values for `params` on the two-dimensional grid
+            declination versus right ascension
+
+        Note
+        ----
+        The periodicity in right ascension is only taken into account
+        internally.
 
         """
-        if pval is None:
-            def pval(ts, sindec):
+        if pVal is None:
+            def pVal(ts, sindec):
                 return ts
 
         # Create rectangular window.
         ra = np.linspace(-width/2., width/2., npoints)
-        ra, dec = np.meshgrid(ra, ra)
+        dra, dec = np.meshgrid(ra, ra)
 
         # Shift window to source location; adjust right ascension for curvature
         # and periodicity.
-        dec += src_dec
-        ra = np.mod(ra/np.cos(dec) + src_ra - 2.*np.pi, 2.*np.pi)
-
-        ra = ra.ravel()
-        dec = dec.ravel()
+        dec = np.ravel(src_dec + dec)
+        dra = np.ravel(dra / np.cos(dec))
+        ra = src_ra + dra
+        mra = np.mod(ra - 2.*np.pi, 2.*np.pi)
 
         # Create seeds for all scan points and tighten seed boundaries. If
         # xmin consists of HEALPy maps, interpolate them.
         dtype = [(p, np.float) for p in ["TS", "pVal"] + self.params]
-        seeds = np.empty_like(ra, dtype=dtype[2:])
+        seeds = np.empty_like(mra, dtype=dtype[2:])
 
         if hasattr(xmin, "__getitem__"):
             if hp.pixelfunc.isnpixok(len(xmin)):
                 zen = np.pi/2. - dec
                 for p in self.params:
-                    seeds[p] = hp.pixelfunc.get_interp_val(xmin[p], zen, ra)
+                    seeds[p] = hp.pixelfunc.get_interp_val(xmin[p], zen, mra)
             else:
                 for p in self.params:
-                    seeds[p] = xmin[p] * np.ones_like(ra, dtype=np.float)
+                    seeds[p] = xmin[p] * np.ones_like(mra, dtype=np.float)
         else:
             seeds = np.zeros_like(seeds)
 
@@ -954,7 +949,7 @@ class BaseLLH(object):
         results = np.empty_like(seeds, dtype=dtype)
         start = time.time()
 
-        for i in range(ra.size):
+        for i in range(mra.size):
             if dec[i] < -np.pi/2. or dec[i] > np.pi/2.:
                 for field in results.dtype.names:
                     results[field][i] = np.nan
@@ -991,8 +986,8 @@ class BaseLLH(object):
             else:
                 seed = {}
 
-            results["TS"][i], pbest = self.fit_source(ra[i], dec[i], **seed)
-            results["pVal"][i] = self.pval(results["TS"][i], np.sin(dec[i]))
+            results["TS"][i], pbest = self.fit_source(mra[i], dec[i], **seed)
+            results["pVal"][i] = pVal(results["TS"][i], np.sin(dec[i]))
 
             for key in pbest:
                 results[key][i] = pbest[key]
@@ -1001,9 +996,20 @@ class BaseLLH(object):
             mins, secs = divmod(stop - start, 60)
 
             print("\t{0:7.2%} after {1:2.0f}' {2:4.1f}'' ({3:8d} of "
-                  "{4:8d})".format((i+1)/ra.size, mins, secs, i+1, ra.size))
+                  "{4:8d})".format((i+1)/mra.size, mins, secs, i+1, mra.size))
 
         results = numpy.lib.recfunctions.append_fields(
-            results, names=["ra", "dec"], data=[ra, dec], usemask=False)
+            results, names=["ra", "dec", "x"],
+            data=[ra, dec, ra - dra*(1. - np.cos(dec))], usemask=False)
 
         return results.reshape((npoints, npoints))
+
+
+def fit_source((llh, src_ra, src_dec, scramble, inject, kwargs, seed)):
+    """Wraps `BaseLLH.fit_source` to enable multi-processing support.
+
+    """
+    if scramble:
+        llh.random = np.random.RandomState(seed)
+
+    return llh.fit_source(src_ra, src_dec, scramble, inject, **kwargs)
