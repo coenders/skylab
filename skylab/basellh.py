@@ -796,7 +796,7 @@ class BaseLLH(object):
                 trials = np.append(
                     trials, self.do_trials(
                         src_ra, src_dec, n_iter,
-                        mu_gen=inj.sample(src_ra, mu), **kwargs))
+                        mu=inj.sample(src_ra, mu), **kwargs))
 
             niterations += 1
 
@@ -864,7 +864,7 @@ class BaseLLH(object):
         trials = np.append(
             trials, self.do_trials(
                 src_ra, src_dec, n_iter,
-                mu_gen=inj.sample(src_ra, mu), **kwargs))
+                mu=inj.sample(src_ra, mu), **kwargs))
 
         return trials
 
