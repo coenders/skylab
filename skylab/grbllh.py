@@ -71,8 +71,8 @@ class BaseLLH(object):
         self.random = np.random.RandomState(seed)
         self.ncpu = ncpu
         self._nselected = 0
-        self._src_ra = np.nan
-        self._src_dec = np.nan
+        self._src_ra = np.inf
+        self._src_dec = np.inf
 
     @abc.abstractmethod
     def _select_events(self, src_ra, src_dec, scramble=True, inject=None):
@@ -601,8 +601,8 @@ class BaseLLH(object):
         fmin *= -np.sign(pbest["nsources"])
 
         # Clear cache.
-        self._src_ra = np.nan
-        self._src_dec = np.nan
+        self._src_ra = np.inf
+        self._src_dec = np.inf
 
         return fmin, pbest
 
