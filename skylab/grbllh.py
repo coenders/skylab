@@ -31,7 +31,8 @@ class BaseLLH(object):
     """Base class for unbinned point source log-likelihood functions
 
     Derived classes must implement the methods `_select_events`, `llh`
-    and the properties `params`, `par_seeds`, `par_bounds` and `size`.
+    and the properties `params`, `par_seeds`, `par_bounds`, `size`, and
+    `sinDec_range`.
 
     Parameters
     ----------
@@ -150,6 +151,272 @@ class BaseLLH(object):
         """int: Number of events the likelihood model is evaluated for.
         """
         pass
+
+    @abc.abstractproperty
+    def sinDec_range(self):
+        """Tuple[float]: Lower and upper allowed sine declination; the
+        default implementation returns ``(-1., 1.)``.
+        """
+        return (-1., 1.)
+
+    def all_sky_scan(self, nside=128, follow_up=2, hemispheres=None,
+                     pval=None):
+        """Scan the entire sky for single point sources.
+
+        Perform an all-sky scan. First calculation is done on a coarse
+        grid with `nside`, follow-up scans are done with a finer
+        binning, while conserving the number of scan points by only
+        evaluating the most promising grid points.
+
+        Parameters
+        ----------
+        nside : Optional[int]
+            NSide value for initial HEALPy map; must be power of 2.
+        follow_up : Optional[int]
+            Controls the grid size of following scans,
+            ``nside *= 2**follow_up``.
+        hemispheres : Optional[Dict[str, Tuple[float]]]
+            Declination boundaries in radian of northern and southern
+            sky; by default, the horizon is at -5 degrees.
+        pval : Optional[Callable[[array_like, array_like], array_like]
+            Converts from test statistic and sine declination to a
+            p-value. The conversion must be monotonic increasing,
+            because follow-up scans focus on high values. The default
+            simply returns the test statistic.
+
+        Returns
+        -------
+        Iterator[Tuple]
+            Structured array describing the scan result and mapping of
+            hemispheres to information about the hottest spot.
+
+        Examples
+        --------
+        In many cases, the test statistic is chi-square distributed.
+
+        >>> def pval(ts, sindec):
+        ...     return -numpy.log10(0.5 * scipy.stats.chi2(2.).sf(ts))
+
+        """
+        if pval is None:
+            def pval(ts, sindec):
+                return ts
+
+        if hemispheres is None:
+            hemispheres = dict(
+                South=(-np.pi/2., -np.deg2rad(5.)),
+                North=(-np.deg2rad(5.), np.pi/2.))
+
+        drange = np.arcsin(self.sinDec_range)
+
+        # NOTE: unique sorts the input list.
+        dbound = np.unique(np.hstack([drange] + hemispheres.values()))
+        dbound = dbound[(dbound >= drange[0]) & (dbound <= drange[1])]
+
+        npoints = hp.nside2npix(nside)
+        ts = np.zeros(npoints, dtype=np.float)
+        xmin = np.zeros_like(ts, dtype=[(p, np.float) for p in self.params])
+
+        niterations = 1
+        while True:
+            print("Iteration {0:2d}\n"
+                  "\tGenerating equal distant points on skymap...\n"
+                  "\t\tNside = {1:4d}, resolution {2:4.2f} deg".format(
+                      niterations, nside, np.rad2deg(hp.nside2resol(nside))))
+
+            # Create grid in declination and right ascension.
+            # NOTE: HEALPy returns the zenith angle in equatorial coordinates.
+            theta, ra = hp.pix2ang(nside, np.arange(hp.nside2npix(nside)))
+            dec = np.pi/2 - theta
+
+            # Interpolate previous scan results on new grid.
+            ts = hp.get_interp_val(ts, theta, ra)
+            pvalue = pval(ts, np.sin(dec))
+
+            xmin = np.array(zip(
+                *[hp.get_interp_val(xmin[p], theta, ra) for p in self.params]),
+                dtype=xmin.dtype)
+
+            # Scan only points above the p-value threshold per hemisphere. The
+            # thresholds depend on what percentage of the sky is evaluated.
+            ppoints = npoints / ts.size
+            print("Analysing {0:7.2%} of the scan...".format(ppoints))
+
+            mask = np.isfinite(ts) & (dec > drange[0]) & (dec < drange[-1])
+
+            for dlow, dup in zip(dbound[:-1], dbound[1:]):
+                print("\tDec. {0:-5.1f} to {1:-5.1f} deg".format(
+                      *np.rad2deg([dlow, dup])), end=": ")
+
+                dout = np.logical_or(dec < dlow, dec > dup)
+
+                if np.all(dout):
+                    print("No scan points here")
+                    continue
+
+                threshold = np.percentile(
+                    pvalue[~dout], 100.*(1. - ppoints))
+
+                tabove = pvalue >= threshold
+
+                print("{0:7.2%} above threshold pVal = {1:.2f}".format(
+                      np.sum(tabove & ~dout) / (tabove.size - dout.sum()),
+                      threshold))
+
+                # Apply threshold mask only to points belonging to the current
+                # hemisphere.
+                mask &= np.logical_or(dout, tabove)
+
+            nscan = mask.sum()
+            area = hp.nside2pixarea(nside) / np.pi
+
+            print("Scanning area of ~{0:4.2f}pi sr ({1:7.2%}, "
+                  "{2:d} pix)".format(nscan*area, nscan/mask.size, nscan))
+
+            start = time.time()
+
+            # Here, the actual scan is done.
+            ts, xmin = self._scan(ra[mask], dec[mask], ts, xmin, mask)
+            pvalue = pval(ts, np.sin(dec))
+
+            stop = time.time()
+
+            mins, secs = divmod(stop - start, 60)
+            hours, mins = divmod(mins, 60)
+
+            print("\tScan finished after {0:3d}h {1:2d}' {2:4.2f}''".format(
+                  int(hours), int(mins), secs))
+
+            result = np.array(
+                zip(ra, dec, ts, pvalue),
+                dtype=[(f, np.float) for f in "ra", "dec", "TS", "pVal"])
+
+            result = numpy.lib.recfunctions.append_fields(
+                result, names=self.params, data=[xmin[p] for p in self.params],
+                dtypes=[np.float for p in self.params], usemask=False)
+
+            yield result, self._hotspot(
+                    result, nside, hemispheres, drange, pval)
+
+        print(67*"-")
+        print("\tNext follow up: nside = {0:d} * 2**{1:d} = {2:d}".format(
+              nside, follow_up, nside * 2**follow_up))
+
+        sys.stdout.flush()
+
+        nside *= 2**follow_up
+        niterations += 1
+
+    def _scan(self, ra, dec, ts, xmin, mask):
+        """Minimize negative log-likelihood function for given source
+        locations.
+
+        """
+        seeds = [
+            {p: s[p] for p in self.params}
+            if s["nsources"] > self._min_ns else {} for s in xmin[mask]
+            ]
+
+        # Minimize negative log-likelihood function for every source position.
+        if (self.ncpu > 1 and ra.size > self.ncpu and
+                self.ncpu <= multiprocessing.cpu_count()):
+            args = [
+                (self, ra[i], dec[i], False, None, seeds[i], None)
+                for i in range(ra.size)
+                ]
+
+            pool = multiprocessing.Pool(self.ncpu)
+            results = pool.map(fs, args)
+
+            pool.close()
+            pool.join()
+        else:
+            results = [
+                self.fit_source(ra[i], dec[i], **seeds[i])
+                for i in range(ra.size)
+                ]
+
+        ts[mask] = [r[0] for r in results]
+
+        for field in xmin.dtype.names:
+            xmin[field][mask] = [r[1][field] for r in results]
+
+        return ts, xmin
+
+    def _hotspot(self, scan, nside, hemispheres, drange, pval):
+        """Gather information about hottest spots in each hemisphere.
+
+        """
+        result = {}
+        for key, dbound in hemispheres.iteritems():
+            mask = (
+                (scan["dec"] >= dbound[0]) & (scan["dec"] <= dbound[1]) &
+                (scan["dec"] > drange[0]) & (scan["dec"] < drange[1])
+                )
+
+            if not np.any(mask):
+                print("{0:s}: No events here".format(key))
+                continue
+
+            if not np.any(scan[mask]["nsources"] > 0):
+                print("{0:s}: No overfluctuation seen".format(key))
+                continue
+
+            hotspot = np.sort(scan[mask], order=["pVal", "TS"])[-1]
+            seed = {p: hotspot[p] for p in self.params}
+
+            print(key)
+            print("Hottest Grid at ra = {0:6.1f}deg, dec = {1:6.1f}deg\n"
+                  "\twith pVal  = {2:4.2f}\n"
+                  "\tand TS     = {3:4.2f} at".format(
+                          np.rad2deg(hotspot["ra"]),
+                          np.rad2deg(hotspot["dec"]),
+                          hotspot["pVal"],
+                          hotspot["TS"])
+                  )
+
+            print("\n".join(
+                "\t{0:10s} = {1:6.2f}".format(p, seed[p]) for p in seed))
+
+            result[key] = dict(grid=dict(
+                ra=hotspot["ra"],
+                dec=hotspot["dec"],
+                nside=nside,
+                pix=hp.ang2pix(nside, np.pi/2 - hotspot["dec"], hotspot["ra"]),
+                TS=hotspot["TS"],
+                pVal=hotspot["pVal"]))
+
+            result[key]["grid"].update(seed)
+
+            fmin, xmin = self.fit_source_loc(
+                hotspot["ra"], hotspot["dec"], size=hp.nside2resol(nside),
+                seed=seed)
+
+            pvalue = np.asscalar(pval(fmin, np.sin(xmin["dec"])))
+
+            print("Refit location: ra = {0:6.1f}deg, dec = {1:6.1f}deg\n"
+                  "\twith pVal  = {2:4.2f}\n"
+                  "\tand TS     = {3:4.2f} at".format(
+                      np.rad2deg(xmin["ra"]),
+                      np.rad2deg(xmin["dec"]),
+                      pvalue,
+                      fmin)
+                  )
+
+            print("\n".join(
+                "\t{0:10s} = {1:6.2f}".format(p, xmin[p]) for p in seed))
+
+            result[key]["fit"] = dict(TS=fmin, pVal=pvalue)
+            result[key]["fit"].update(xmin)
+
+            if result[key]["grid"]["pVal"] > result[key]["fit"]["pVal"]:
+                result[key]["best"] = result[key]["grid"]
+            else:
+                result[key]["best"] = result[key]["fit"]
+
+            sys.stdout.flush()
+
+        return result
 
     def fit_source(self, src_ra, src_dec, scramble=False, inject=None,
                    **kwargs):
@@ -902,3 +1169,9 @@ class GRBLlh(BaseLLH):
         """int: Total number of events contained in `data`
         """
         return self.data["on"].size + self.data["off"].size
+
+    @property
+    def sinDec_range(self):
+        """Tuple[float]: Lower and upper allowed sine declination
+        """
+        return self.llh_model.sinDec_range
