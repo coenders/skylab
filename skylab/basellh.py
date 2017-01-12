@@ -33,7 +33,7 @@ from . import utils
 
 
 class BaseLLH(object):
-    """Base class for unbinned point source log-likelihood functions
+    r"""Base class for unbinned point source log-likelihood functions
 
     Derived classes must implement the methods `_select_events`, `llh`,
     and the properties `params`, `par_seeds`, `par_bounds`, and
@@ -44,7 +44,7 @@ class BaseLLH(object):
 
     Parameters
     ----------
-    seed : Optional[int]
+    seed : int, optional
         Random seed initializing the pseudo-random number generator.
 
     Attributes
@@ -54,7 +54,7 @@ class BaseLLH(object):
     nsource_rho : float
         Use fraction `nsource_rho` of the number of selected events as a
         seed for the source strength parameter.
-    nsource_bounds : Tuple[float]
+    nsource_bounds : tuple(float)
         Lower and upper bound for source strength parameter
     random : RandomState
         Pseudo-random number generator
@@ -85,7 +85,7 @@ class BaseLLH(object):
 
     @abc.abstractmethod
     def _select_events(self, src_ra, src_dec, scramble=False, inject=None):
-        """Select events for log-likelihood evaluation.
+        r"""Select events for log-likelihood evaluation.
 
         This method must set the private attributes number of total
         events `_nevents` and number of selected events `_nselected`.
@@ -96,9 +96,9 @@ class BaseLLH(object):
             Right ascension of source position
         src_dec : float
             Declination of source position
-        scramble : Optional[bool]
+        scramble : bool, optional
             Scramble select events in right ascension.
-        inject : Optional[ndarray]
+        inject : ndarray, optional
             Structured array containing additional events to append to
             selection
 
@@ -107,7 +107,7 @@ class BaseLLH(object):
 
     @abc.abstractmethod
     def llh(self, nsources, **others):
-        """Evaluate log-likelihood function given the source strength
+        r"""Evaluate log-likelihood function given the source strength
         `nsources` and the parameter values specified in `others`.
 
         Parameters
@@ -129,14 +129,14 @@ class BaseLLH(object):
 
     @abc.abstractproperty
     def params(self):
-        """List[str]: Log-likelihood parameter names; the default
+        r"""List[str]: Log-likelihood parameter names; the default
         implementation returns ``nsources``.
         """
         return ["nsources"]
 
     @abc.abstractproperty
     def par_seeds(self):
-        """ndarray: Log-likelihood parameter seeds; the default
+        r"""ndarray: Log-likelihood parameter seeds; the default
         implementation returns the seed for the source strength.
         """
         if self._nselected > 0:
@@ -148,21 +148,21 @@ class BaseLLH(object):
 
     @abc.abstractproperty
     def par_bounds(self):
-        """ndarray: Lower and upper log-likelihood parameter bounds; the
+        r"""ndarray: Lower and upper log-likelihood parameter bounds; the
         default implementation returns `nsource_bounds`.
         """
         return np.atleast_1d(self.nsource_bounds)
 
     @abc.abstractproperty
     def sinDec_range(self):
-        """ndarray: Lower and upper allowed sine declination; the
+        r"""ndarray: Lower and upper allowed sine declination; the
         default implementation returns ``(-1., 1.)``.
         """
         return np.array([-1., 1.])
 
     def all_sky_scan(self, nside=128, follow_up_factor=2, hemispheres=None,
                      pVal=None):
-        """Scan the entire sky for single point sources.
+        r"""Scan the entire sky for single point sources.
 
         Perform an all-sky scan. First calculation is done on a coarse
         grid with `nside`, follow-up scans are done with a finer
@@ -171,15 +171,15 @@ class BaseLLH(object):
 
         Parameters
         ----------
-        nside : Optional[int]
+        nside : int, optional
             NSide value for initial HEALPy map; must be power of 2.
-        follow_up_factor : Optional[int]
+        follow_up_factor : int, optional
             Controls the grid size of following scans,
             ``nside *= 2**follow_up_factor``.
-        hemispheres : Optional[Dict[str, Tuple[float]]]
+        hemispheres : dict(str, tuple(float)), optional
             Declination boundaries in radian of northern and southern
             sky; by default, the horizon is at -5 degrees.
-        pVal : Optional[Callable[[ndarray, ndarray], ndarray]
+        pVal : callable, optional
             Calculates the p-value given the test statistic and
             optionally sine declination of the source position; by
             default the p-value is equal the test statistic. The p-value
@@ -188,7 +188,7 @@ class BaseLLH(object):
 
         Returns
         -------
-        Iterator[Tuple]
+        iterator
             Structured array describing the scan result and mapping of
             hemispheres to information about the hottest spot.
 
@@ -310,7 +310,7 @@ class BaseLLH(object):
         niterations += 1
 
     def _scan(self, ra, dec, ts, xmin, mask):
-        """Minimize negative log-likelihood function for given source
+        r"""Minimize negative log-likelihood function for given source
         locations.
 
         """
@@ -346,7 +346,7 @@ class BaseLLH(object):
         return ts, xmin
 
     def _hotspot(self, scan, nside, hemispheres, drange, pVal):
-        """Gather information about hottest spots in each hemisphere.
+        r"""Gather information about hottest spots in each hemisphere.
 
         """
         result = {}
@@ -420,7 +420,7 @@ class BaseLLH(object):
 
     def fit_source(self, src_ra, src_dec, scramble=False, inject=None,
                    **kwargs):
-        """Minimize the negative log-likelihood function at source
+        r"""Minimize the negative log-likelihood function at source
         position.
 
         Parameters
@@ -429,10 +429,10 @@ class BaseLLH(object):
             Right ascension of source position
         src_dec : float
             Declination of source position
-        scramble : Optional[bool]
+        scramble : bool, optional
             Scramble events in right ascension prior to selection.
-        inject : Optional[ndarray]
-            Structured array containing additional events to append to
+        inject : ndarray, optional
+            Structured array describing additional events to append to
             selection
         \*\*kwargs
             Seeds for parameters given in `params` and parameters passed
@@ -443,7 +443,7 @@ class BaseLLH(object):
         fmin : float
             Minimal negative log-likelihood converted into the test
             statistic ``-sign(ns)*llh``
-        pbest : Dict[str, float]
+        pbest : dict(str, float)
             Parameters minimizing the negative log-likelihood function
 
         Raises
@@ -466,7 +466,7 @@ class BaseLLH(object):
             return 0., pbest
 
         def llh(x, *args):
-            """Wrap log-likelihood to work with arrays and return the
+            r"""Wrap log-likelihood to work with arrays and return the
             negative log-likelihood, which will be minimized.
 
             """
@@ -526,7 +526,7 @@ class BaseLLH(object):
         return fmin, pbest
 
     def fit_source_loc(self, src_ra, src_dec, size, seed, **kwargs):
-        """Minimize the negative log-likelihood function around source
+        r"""Minimize the negative log-likelihood function around source
         position.
 
         Parameters
@@ -537,7 +537,7 @@ class BaseLLH(object):
             Declination of interesting position
         size : float
             Size of box around source position for minimization
-        seed : Dict[str, float]
+        seed : dict(str, float)
             Seeds for remaining parameters; e.g. result from a previous
             `fit_source` call.
         \*\*kwargs
@@ -548,12 +548,12 @@ class BaseLLH(object):
         fmin : float
             Minimal negative log-likelihood converted into the test
             statistic ``-sign(ns)*llh``
-        pbest : Dict[str, float]
+        pbest : dict(str, float)
             Parameters minimizing the negative log-likelihood function
 
         """
         def llh(x, *args):
-            """Wrap log-likelihood to work with arrays and return the
+            r"""Wrap log-likelihood to work with arrays and return the
             negative log-likelihood, which will be minimized.
 
             """
@@ -605,7 +605,7 @@ class BaseLLH(object):
 
     def do_trials(self, src_ra, src_dec, n_iter=int(1e5), mu=None,
                   **kwargs):
-        """Create trials of scrambled event maps to estimate the test
+        r"""Create trials of scrambled event maps to estimate the test
         statistic distribution.
 
         Parameters
@@ -614,9 +614,9 @@ class BaseLLH(object):
             Right ascension of source position
         src_dec : float
             Declination of source position
-        n_iter : Optional[int]
+        n_iter : int, optional
             Number of trials to create
-        mu : Optional[Injector]
+        mu : Injector, optional
             Inject additional events into the scrambled map.
         \*\*kwargs
             Parameters passed to `fit_source`
@@ -670,7 +670,7 @@ class BaseLLH(object):
 
     def sensitivity(self, src_ra, src_dec, ts, beta, inj, n_iter=1000,
                     eps=5e-3, trials=None, **kwargs):
-        """Calculate sensitivity for a given source hypothesis.
+        r"""Calculate sensitivity for a given source hypothesis.
 
         Generate signal trials by injecting events arriving from the
         position of the source until a fraction `beta` of trials have a
@@ -691,11 +691,11 @@ class BaseLLH(object):
         inj : Injector
             Inject events arriving from the position of the source into
             the scrambled map.
-        n_iter : Optional[int]
+        n_iter : int, optional
             Number of trials to per iteration
-        eps : Optional[float]
+        eps : float, optional
             Precision in `beta` for execution to break
-        trials : Optional[ndarray]
+        trials : ndarray, optional
             Structured array describing already performed trials,
             containing number of injected events ``n_inj``, test
             statistic ``TS`` and best-fit values for `params` per trial
@@ -893,12 +893,12 @@ class BaseLLH(object):
             Declination of source position
         width : float
             Window size
-        npoints : Optional[int]
+        npoints : int, optional
             Number of scan points per dimension
-        xmin : Optional[Dict[str, float]]
+        xmin : dict(str, float), optional
             Seeds for parameters given in `params`; either one value or
             a HEALPy map per parameter.
-        pVal : Optional[Callable[[ndarray, ndarray], ndarray]]
+        pVal : callable, optional
             Calculates the p-value given the test statistic and
             optionally sine declination of the source position; by
             default the p-value is equal the test statistic.
@@ -1019,7 +1019,7 @@ class BaseLLH(object):
 
 
 def fit_source((llh, src_ra, src_dec, scramble, inject, kwargs, seed)):
-    """Wraps `BaseLLH.fit_source` to enable multi-processing support.
+    r"""Wraps `BaseLLH.fit_source` to enable multi-processing support.
 
     """
     if scramble:

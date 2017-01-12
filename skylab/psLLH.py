@@ -48,10 +48,10 @@ class PointSourceLLH(basellh.BaseLLH):
     Attributes
     ----------
     exp : ndarray
-        Structured array describing the experimental data; essential
-        fields are right ascension ``ra``, declination ``dec`` or sine
-        declination ``sinDec``, and angular uncertainty ``sigma`` for
-        the class likelihood model without energy weights.
+        Structured array describing the experimental data; for a
+        likelihood model without energy weights, the essential fields
+        are right ascension ``ra``, declination ``dec`` or sine
+        declination ``sinDec``, and angular uncertainty ``sigma``.
     livetime : float
         Livetime of experimental data in days
     llh_model : NullModel
@@ -104,7 +104,7 @@ class PointSourceLLH(basellh.BaseLLH):
 
     @classmethod
     def upscale(cls, exp, livetime, llh_model, **kwargs):
-        r"""Up-scale expiremental data to new livetime.
+        r"""Up-scale experimental data to new livetime.
 
         Parameters
         ----------
@@ -339,7 +339,7 @@ class MultiPointSourceLLH(basellh.BaseLLH):
     Handles multiple event samples that are distinct of each other.
     Different samples have different effective areas that have to be
     taken into account for parting the number of expected neutrinos in
-    between the diffenrent samples. Each sample is represented as an
+    between the different samples. Each sample is represented as an
     instance of `PointSourceLLH`.
 
     Arguments and keyword arguments are passed to `basellh.BaseLLH`.
