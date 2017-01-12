@@ -1,3 +1,21 @@
+# -*- coding: utf-8 -*-
+
+r"""This file is part of SkyLab
+
+Skylab is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+"""
 from __future__ import division, print_function
 
 import abc
@@ -17,9 +35,12 @@ from . import utils
 class BaseLLH(object):
     """Base class for unbinned point source log-likelihood functions
 
-    Derived classes must implement the methods `_select_events`, `llh`
-    and the properties `params`, `par_seeds`, `par_bounds`, `size`, and
-    `sinDec_range`.
+    Derived classes must implement the methods `_select_events`, `llh`,
+    and the properties `params`, `par_seeds`, `par_bounds`, and
+    `sinDec_range`; check corresponding docs for more details.
+
+    The private attributes `_src_ra` and `_src_dec` can be used to cache
+    the tested source position.
 
     Parameters
     ----------
@@ -57,13 +78,17 @@ class BaseLLH(object):
         self.nsource_bounds = nsource_bounds
         self.random = np.random.RandomState(seed)
         self.ncpu = ncpu
+        self._nevents = 0
         self._nselected = 0
         self._src_ra = np.inf
         self._src_dec = np.inf
 
     @abc.abstractmethod
-    def _select_events(self, src_ra, src_dec, scramble=True, inject=None):
+    def _select_events(self, src_ra, src_dec, scramble=False, inject=None):
         """Select events for log-likelihood evaluation.
+
+        This method must set the private attributes number of total
+        events `_nevents` and number of selected events `_nselected`.
 
         Parameters
         ----------
@@ -72,15 +97,10 @@ class BaseLLH(object):
         src_dec : float
             Declination of source position
         scramble : Optional[bool]
-            Scramble events prior to selection.
+            Scramble select events in right ascension.
         inject : Optional[ndarray]
             Structured array containing additional events to append to
             selection
-
-        Returns
-        -------
-        int
-            Number of selected events
 
         """
         pass
@@ -134,17 +154,11 @@ class BaseLLH(object):
         return np.atleast_1d(self.nsource_bounds)
 
     @abc.abstractproperty
-    def size(self):
-        """int: Number of events the likelihood model is evaluated for.
-        """
-        pass
-
-    @abc.abstractproperty
     def sinDec_range(self):
-        """Tuple[float]: Lower and upper allowed sine declination; the
+        """ndarray: Lower and upper allowed sine declination; the
         default implementation returns ``(-1., 1.)``.
         """
-        return (-1., 1.)
+        return np.array([-1., 1.])
 
     def all_sky_scan(self, nside=128, follow_up_factor=2, hemispheres=None,
                      pVal=None):
@@ -442,10 +456,9 @@ class BaseLLH(object):
 
         """
         # Set all weights once for this source location, if not already cached.
-        self._nselected = self._select_events(
-            src_ra, src_dec, scramble, inject)
+        self._select_events(src_ra, src_dec, scramble, inject)
 
-        if self.size < 1:
+        if self._nevents < 1:
             # No events were selected; return default seeds.
             pbest = dict(zip(self.params, self.par_seeds))
             pbest["nsources"] = 0.
@@ -500,7 +513,7 @@ class BaseLLH(object):
             fmin = 0.
             xmin[0] = 0.
 
-        if self.size > 0 and abs(xmin[0]) > self._rho_max * self._nselected:
+        if self._nevents > 0 and abs(xmin[0]) > self._rho_max*self._nselected:
             print("nsources > {0:7.2%} * {1:6d} selected events, fit-value "
                   "nsources = {2:8.1f}".format(
                       self._rho_max, self._nselected, xmin[0]))
@@ -548,7 +561,7 @@ class BaseLLH(object):
             # to be selected; cache position.
             if (np.fabs(x[0] - self._src_ra) > 0. or
                     np.fabs(x[1] - self._src_dec) > 0.):
-                self._nselected = self._select_events(x[0], x[1])
+                self._select_events(x[0], x[1])
                 self._src_ra = x[0]
                 self._src_dec = x[1]
 
@@ -573,7 +586,7 @@ class BaseLLH(object):
         xmin, fmin, success = scipy.optimize.fmin_l_bfgs_b(
             llh, params, bounds=bounds, approx_grad=True, **kwargs)
 
-        if self.size > 0 and abs(xmin[0]) > self._rho_max * self._nselected:
+        if self._nevents > 0 and abs(xmin[0]) > self._rho_max*self._nselected:
             print("nsources > {0:7.2%} * {1:6d} selected events, fit-value "
                   "nsources = {2:8.1f}".format(
                       self._rho_max, self._nselected, xmin[0]))
