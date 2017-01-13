@@ -160,10 +160,8 @@ class PointSourceLLH(basellh.BaseLLH):
 
         lines.append("\tDeclination Range  : {0:6.1f} - {1:6.1f} deg".format(
             *srange))
-
         lines.append("\tlog10 Energy Range : {0:6.1f} - {1:6.1f}".format(
             *erange))
-
         lines.append("\tLivetime of sample : {0:7.2f} days".format(
             self.livetime))
 
@@ -541,8 +539,8 @@ class MultiPointSourceLLH(basellh.BaseLLH):
         # gamma will be always minimized over, because it is used in the
         # weighting.
         params = set(
-            p for e in self._samples for p in self._samples[e].llh_model.params
-            )
+            p for e in self._samples
+            for p in self._samples[e].llh_model.params)
 
         return super(MultiPointSourceLLH, self).params + list(params)
 
@@ -560,14 +558,7 @@ class MultiPointSourceLLH(basellh.BaseLLH):
             for p in self.params[1:]
             ]
 
-        nselected = sum(self.samples[e]._nselected for e in self._samples)
-
-        if nselected > 0:
-            ns = min(self.nsource, self.nsource_rho * self._nselected)
-        else:
-            ns = self.nsource
-
-        return np.hstack([[ns], seeds])
+        return np.hstack((super(MultiPointSourceLLH, self).par_seeds, seeds))
 
     @property
     def par_bounds(self):
