@@ -69,6 +69,8 @@ class PointSourceLLH(basellh.BaseLLH):
     basellh.BaseLLH
 
     """
+    _aval = 1e-3
+
     def __init__(self, exp, livetime, llh_model, scramble=True, mode="box",
                  delta_ang=np.deg2rad(10.), thresh_S=0., **kwargs):
         super(PointSourceLLH, self).__init__(**kwargs)
