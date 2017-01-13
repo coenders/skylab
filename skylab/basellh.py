@@ -151,7 +151,7 @@ class BaseLLH(object):
         r"""ndarray: Lower and upper log-likelihood parameter bounds; the
         default implementation returns `nsource_bounds`.
         """
-        return np.atleast_1d(self.nsource_bounds)
+        return np.atleast_2d(self.nsource_bounds)
 
     @abc.abstractproperty
     def sinDec_range(self):
@@ -300,14 +300,14 @@ class BaseLLH(object):
             yield result, self._hotspot(
                     result, nside, hemispheres, drange, pVal)
 
-        print(67*"-")
-        print("\tNext follow up: nside = {0:d} * 2**{1:d} = {2:d}".format(
-              nside, follow_up_factor, nside * 2**follow_up_factor))
+            print(67*"-")
+            print("\tNext follow up: nside = {0:d} * 2**{1:d} = {2:d}".format(
+                  nside, follow_up_factor, nside * 2**follow_up_factor))
 
-        sys.stdout.flush()
+            sys.stdout.flush()
 
-        nside *= 2**follow_up_factor
-        niterations += 1
+            nside *= 2**follow_up_factor
+            niterations += 1
 
     def _scan(self, ra, dec, ts, xmin, mask):
         r"""Minimize negative log-likelihood function for given source
