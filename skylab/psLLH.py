@@ -40,6 +40,11 @@ class PointSourceLLH(basellh.BaseLLH):
 
     Parameters
     ----------
+    mc : ndarray
+        Structured array describing the simulated data; same fields as
+        `exp` plus true right ascension ``trueRa``, true declination
+        ``trueDec``, true energy ``trueE``, and weight ``ow``. It is
+        passed to the likelihood model `llh_model``.
     scramble : bool, optional
         Scramble experimental data in right ascension.
     \*\*kwargs
@@ -69,9 +74,11 @@ class PointSourceLLH(basellh.BaseLLH):
     basellh.BaseLLH
 
     """
+    # The log-likelihood function will be taylor-expanded around this treshold
+    # value; see llh method.
     _aval = 1e-3
 
-    def __init__(self, exp, livetime, llh_model, scramble=True, mode="box",
+    def __init__(self, exp, mc, livetime, llh_model, scramble=True, mode="box",
                  delta_ang=np.deg2rad(10.), thresh_S=0., **kwargs):
         super(PointSourceLLH, self).__init__(**kwargs)
 
@@ -90,12 +97,13 @@ class PointSourceLLH(basellh.BaseLLH):
                   "\t# Working on >> UNBLINDED << data! #\n"
                   "\t####################################\n")
 
+        self.exp = exp
+        self.livetime = livetime
+        self.set_llh_model(llh_model, mc=mc)
+
         # Calculate background probability here because it does not change.
         self.exp = numpy.lib.recfunctions.append_fields(
-            exp, names="B", data=llh_model.background(exp), usemask=False)
-
-        self.livetime = livetime
-        self.llh_model = llh_model
+            self.exp, names="B", data=llh_model.background(exp), usemask=False)
 
         self.mode = mode
         self.delta_ang = delta_ang
@@ -222,6 +230,9 @@ class PointSourceLLH(basellh.BaseLLH):
 
         events = self.exp[mask]
 
+        if scramble:
+            events["ra"] = self.random.uniform(0., 2.*np.pi, size=events.size)
+
         if self.mode == "box":
             # Select events inside right ascension box: the solid angle is a
             # function of declination, i.e., for a fixed solid angle, the right
@@ -232,9 +243,6 @@ class PointSourceLLH(basellh.BaseLLH):
             cosmin = np.amin(np.cos([dmin, dmax]))
             dphi = np.amin([2.*np.pi, 2.*self.delta_ang/cosmin])
             events = events[dra < dphi/2.]
-
-        if scramble and not self.fix:
-            events["ra"] = self.random.uniform(0., 2.*np.pi, size=events.size)
 
         if inject is not None:
             inject = numpy.lib.recfunctions.append_fields(
@@ -277,8 +285,7 @@ class PointSourceLLH(basellh.BaseLLH):
         arel = (alpha[~mask] - aval) / self._aval
         ts[~mask] = np.log1p(aval) + arel - arel**2 / 2.
 
-        # Multiply by two for chi-square distributed test-statistic.
-        ts = 2. * ts.sum()
+        ts = ts.sum()
 
         nsgrad = np.empty_like(alpha, dtype=np.float)
         nsgrad[mask] = x[mask] / (1. + alpha[mask])
@@ -291,7 +298,7 @@ class PointSourceLLH(basellh.BaseLLH):
             nsgrad -= ndiff / (self._nevents - nsources)
 
         if wgrad is not None:
-            pgrad = 1. / self._nevents * SoB * wgrad
+            pgrad = SoB * wgrad / self._nevents
             pgrad[:, mask] *= nsources / (1. + alpha[mask])
             pgrad[:, ~mask] *= nsources * (1. - arel) / self._aval
             pgrad = pgrad.sum(axis=-1)
@@ -299,11 +306,32 @@ class PointSourceLLH(basellh.BaseLLH):
         else:
             pgrad = np.zeros((0,))
 
+        # Multiply by two for chi-square distributed test-statistic.
+        ts *= 2.
         grad = 2. * np.append(nsgrad, pgrad)
 
         return ts, grad
 
     llh.__doc__ = basellh.BaseLLH.llh.__doc__
+
+    def set_llh_model(self, model, mc=None):
+        r"""Set ``llh_model`` to new likelihood model.
+
+        Parameters
+        ----------
+        model : NullModel
+            Likelihood model derived from `ps_model.NullModel`
+        mc : ndarray, optional
+            Structured array describing the simulated data; same fields
+            as `exp` plus true right ascension ``trueRa``, true
+            declination ``trueDec``, true energy ``trueE``, and weight
+            ``ow``. It is passed to the likelihood model `llh_model``.
+
+        """
+        if mc is not None:
+            model(self.exp, mc, livetime=self.livetime)
+
+        self.llh_model = model
 
     @property
     def params(self):
