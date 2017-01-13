@@ -351,8 +351,9 @@ class PointSourceLLH(basellh.BaseLLH):
     def par_bounds(self):
         r"""ndarray: Lower and upper log-likelihood parameter bounds
         """
-        bounds = [self.llh_model.params[p][1] for p in self.params[1:]]
-        return np.vstack((super(PointSourceLLH, self).par_bounds, bounds))
+        bounds = list(super(PointSourceLLH, self).par_bounds)
+        bounds.extend(self.llh_model.params[p][1] for p in self.params[1:])
+        return np.vstack(bounds)
 
     @property
     def sinDec_range(self):
@@ -379,7 +380,7 @@ class MultiPointSourceLLH(basellh.BaseLLH):
     """
     def __init__(self, *args, **kwargs):
         super(MultiPointSourceLLH, self).__init__(*args, **kwargs)
-        self._enum = {}
+        self._enums = {}
         self._samples = {}
 
     def __str__(self):
@@ -394,12 +395,12 @@ class MultiPointSourceLLH(basellh.BaseLLH):
         nevents = 0
         livetime = 0
 
-        for enum in sorted(self._enum.keys()):
+        for enum in sorted(self._enums.keys()):
             n = self._samples[enum].exp.size
             tlive = self._samples[enum].livetime
 
             lines.append("\t{0:2d} {1:>10s} {2:8.2f} {3:6d}".format(
-                enum, self._enum[enum], tlive, n))
+                enum, self._enums[enum], tlive, n))
 
             nevents += n
             livetime += tlive
@@ -408,7 +409,7 @@ class MultiPointSourceLLH(basellh.BaseLLH):
         lines.append("Total livetime  : {0:9.2f}".format(livetime))
         lines.append(67 * "-")
 
-        for enum in sorted(self._enum.keys()):
+        for enum in sorted(self._enums.keys()):
             lines.append("Dataset {0:2d}\n".format(enum))
             lines.append(67 * "-")
 
@@ -433,7 +434,7 @@ class MultiPointSourceLLH(basellh.BaseLLH):
         r"""Return number of event samples
 
         """
-        return len(self._enum)
+        return len(self._enums)
 
     def add_sample(self, name, llh):
         r"""Add log-likelihood function object.
@@ -452,15 +453,15 @@ class MultiPointSourceLLH(basellh.BaseLLH):
         names = self._enums.values()
 
         if name in names:
-            enum = self._enum.keys()[names.index(name)]
+            enum = self._enums.keys()[names.index(name)]
             print("Overwrite Sample {0:2d} - {1:s}".format(enum, name))
         else:
             if len(names) > 0:
-                enum = max(self._enum) + 1
+                enum = max(self._enums) + 1
             else:
                 enum = 0
 
-        self._enum[enum] = name
+        self._enums[enum] = name
         self._samples[enum] = llh
 
     def _select_events(self, src_ra, src_dec, scramble=False, inject=None):
@@ -473,7 +474,7 @@ class MultiPointSourceLLH(basellh.BaseLLH):
             else:
                 events = inject
 
-            self.samples[enum]._select_events(
+            self._samples[enum]._select_events(
                 src_ra, src_dec, scramble=scramble, inject=events)
 
             self._nevents += self._samples[enum]._nevents
@@ -510,7 +511,7 @@ class MultiPointSourceLLH(basellh.BaseLLH):
             Gradient for each parameter
 
         """
-        nsamples = len(self._enum)
+        nsamples = len(self._enums)
         weights = np.empty(nsamples, dtype=np.float)
         wgrad = np.zeros((nsamples, len(self.params) - 1), dtype=np.float)
 
@@ -551,7 +552,7 @@ class MultiPointSourceLLH(basellh.BaseLLH):
                 if param not in self._samples[enum].params:
                     continue
 
-                grad[j + 1] += fgrad[self._samples[enum].index(param)]
+                grad[j + 1] += fgrad[self._samples[enum].params.index(param)]
 
         return ts, grad
 
@@ -594,8 +595,10 @@ class MultiPointSourceLLH(basellh.BaseLLH):
     def par_bounds(self):
         r"""ndarray: Lower and upper log-likelihood parameter bounds
         """
+        bounds = list(super(MultiPointSourceLLH, self).par_bounds)
+
         # Use tightest parameter bounds.
-        bounds = [
+        pbounds = [
             np.vstack([
                 self._samples[e].llh_model.params[p][1]
                 for e in self._samples
@@ -604,15 +607,14 @@ class MultiPointSourceLLH(basellh.BaseLLH):
             for p in self.params[1:]
             ]
 
-        bounds = [(np.amax(b[:, 0]), np.amin(b[:, 1])) for b in bounds]
-        return np.vstack((super(MultiPointSourceLLH, self).par_bounds, bounds))
+        bounds.extend((np.amax(b[:, 0]), np.amin(b[:, 1])) for b in pbounds)
+        return np.vstack(bounds)
 
     @property
     def sinDec_range(self):
         r"""ndarray: Lower and upper allowed sine declination
         """
-        srange = np.vstack([
-            self._samples[e].llh_model.sinDec_range for e in self._samples
-            ])
-
+        srange = [s.llh_model.sinDec_range for s in self._samples.itervalues()]
+        srange.append(super(MultiPointSourceLLH, self).sinDec_range)
+        srange = np.vstack(srange)
         return np.array([np.amin(srange[:, 0]), np.amax(srange[:, 1])])

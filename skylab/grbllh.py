@@ -164,8 +164,9 @@ class GRBLlh(basellh.BaseLLH):
     def par_bounds(self):
         r"""ndarray: Lower and upper log-likelihood parameter bounds
         """
-        bounds = [self.llh_model.params[p][1] for p in self.params[1:]]
-        return np.vstack((super(GRBLlh, self).par_bounds, bounds))
+        bounds = list(super(PointSourceLLH, self).par_bounds)
+        bounds.extend(self.llh_model.params[p][1] for p in self.params[1:])
+        return np.vstack(bounds)
 
     @property
     def sinDec_range(self):
