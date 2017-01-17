@@ -26,7 +26,7 @@ def plotting(backend="QT4Agg"):
         mpl.use(backend)
 
     rcParams = dict()
-    rcParams["text.size"] = 10
+    # rcParams["text.size"] = 10
     rcParams["font.size"] = 10
     rcParams["font.family"] = "serif"
     rcParams["font.serif"] = ["Computer Modern"]
@@ -36,8 +36,8 @@ def plotting(backend="QT4Agg"):
     rcParams["figure.dpi"] = 72.27
     rcParams["figure.figsize"] = (tw, tw / 1.6)
     rcParams["figure.autolayout"] = True
-    rcParams["axes.color_cycle"] =["#d7191c", "#2b83ba", "#756bb1",
-                                   "#fdae61", "#abdda4"]
+    # rcParams["axes.color_cycle"] =["#d7191c", "#2b83ba", "#756bb1",
+    #                                "#fdae61", "#abdda4"]
     rcParams["axes.labelsize"] = 10
     rcParams["xtick.labelsize"] = 10
     rcParams["ytick.labelsize"] = 10
