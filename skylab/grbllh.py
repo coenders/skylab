@@ -115,7 +115,8 @@ class GRBLlh(basellh.BaseLLH):
                 inject, names="B", data=self.llh_model.background(inject),
                 usemask=False)
 
-            self._events = np.append(self._events, inject)
+            self._events = np.append(
+                self._events, inject[list(self._events.dtype.names)])
 
         self._signal = self.llh_model.signal(src_ra, src_dec, self._events)
 
@@ -164,7 +165,7 @@ class GRBLlh(basellh.BaseLLH):
     def par_bounds(self):
         r"""ndarray: Lower and upper log-likelihood parameter bounds
         """
-        bounds = list(super(PointSourceLLH, self).par_bounds)
+        bounds = list(super(GRBLlh, self).par_bounds)
         bounds.extend(self.llh_model.params[p][1] for p in self.params[1:])
         return np.vstack(bounds)
 
