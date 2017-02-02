@@ -73,10 +73,10 @@ def poisson_percentile(mu, x, y, yval):
     m = y > yval
     u = np.sum(w[m], dtype=np.float)
 
-    err = np.sqrt(np.sum(w[m]**2)) / np.sum(w)
-
     if u == 0.:
         return 1., 1.
+
+    err = np.sqrt(np.sum(w[m]**2)) / np.sum(w)
 
     return u / np.sum(w, dtype=np.float), err
 
