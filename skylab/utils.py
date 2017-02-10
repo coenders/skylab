@@ -217,7 +217,7 @@ class delta_chi2(object):
             "\t\tScale = {5:6.2f}\n"
             "\t\tKS    = {6:7.2%}").format(
                 repr(self), self.eta, self.eta_err,
-                self.par[0], self.par[1], self.par[2], ks)
+                self.par[0], self.par[1], self.par[2], self.ks)
 
     def pdf(self, x):
         r"""Probability density function
@@ -277,7 +277,7 @@ class delta_exp(object):
 
         # amount of overfluctuations
         self.eta = float(np.count_nonzero(data > 0)) / len(data)
-        self_eta_err = np.sqrt(self.eta * (1. - self.eta) / len(data))
+        self.eta_err = np.sqrt(self.eta * (1. - self.eta) / len(data))
 
         # sort data and construct cumulative distribution
         x = np.sort(data[data > 0])
@@ -302,9 +302,9 @@ class delta_exp(object):
         r"""Probability densitiy function
 
         """
-        return np.where(val > 0, np.polyval(np.polyder(self.p), val)
-                                    * np.exp(np.polyval(self.p, val)),
-                        self.eta)
+        return np.where(
+            val > 0, np.polyval(np.polyder(self.p), val) *
+            np.exp(np.polyval(self.p, val)), self.eta)
 
     def sf(self, val):
         r"""Survival function
@@ -382,20 +382,24 @@ class twoside_chi2(object):
         return
 
     def __str__(self):
-        return ("Two-sided chi-square {0:s}\n".format(self.__repr__())
-               +"\tSeparation factor = {0:8.3%} +/- {1:8.3%}\n".format(
-                    self.eta, self.eta_err)
-               +"\tRight side:\n"
-               +"\t\tNDoF  = {0:6.2f}\n".format(self.par1[0])
-               +"\t\tMean  = {0:6.2f}\n".format(self.par1[1])
-               +"\t\tScale = {0:6.2f}\n".format(self.par1[2])
-               +"\t\tKS    = {0:7.2%}\n".format(self.ks1)
-               +"\tLeft side:\n"
-               +"\t\tNDoF  = {0:6.2f}\n".format(self.par2[0])
-               +"\t\tMean  = {0:6.2f}\n".format(self.par2[1])
-               +"\t\tScale = {0:6.2f}\n".format(self.par2[2])
-               +"\t\tKS    = {0:7.2%}\n".format(self.ks2)
-               )
+        return (
+            "Two-sided chi-square {0:s}\n"
+            "\tSeparation factor = {1:8.3%} +/- {2:8.3%}\n"
+            "\tRight side:\n"
+            "\t\tNDoF  = {3:6.2f}\n"
+            "\t\tMean  = {4:6.2f}\n"
+            "\t\tScale = {5:6.2f}\n"
+            "\t\tKS    = {6:7.2%}\n"
+            "\tLeft side:\n"
+            "\t\tNDoF  = {7:6.2f}\n"
+            "\t\tMean  = {8:6.2f}\n"
+            "\t\tScale = {9:6.2f}\n"
+            "\t\tKS    = {10:7.2%}\n"
+            ).format(
+                repr(self), self.eta, self.eta_err,
+                self.par1[0], self.par1[1], self.par1[2], self.ks1,
+                self.par2[0], self.par2[1], self.par2[2], self.ks2
+                )
 
     def pdf(self, x):
         r"""Probability density function.
@@ -407,8 +411,9 @@ class twoside_chi2(object):
         r"""Logarithmic pdf.
 
         """
-        return np.where(x > 0, np.log(self.eta) + self.f1.logpdf(x),
-                               np.log(1. - self.eta) + self.f2.logpdf(-x))
+        return np.where(
+            x > 0, np.log(self.eta) + self.f1.logpdf(x),
+            np.log(1. - self.eta) + self.f2.logpdf(-x))
 
     def cdf(self, x):
         r"""Probability mass function.
@@ -420,8 +425,9 @@ class twoside_chi2(object):
         r"""Logarithmic cdf.
 
         """
-        return np.where(x > 0, np.log(self.eta) + self.f1.logcdf(x),
-                               np.log(1. - self.eta) + self.f2.logsf(-x))
+        return np.where(
+            x > 0, np.log(self.eta) + self.f1.logcdf(x),
+            np.log(1. - self.eta) + self.f2.logsf(-x))
 
     def sf(self, x):
         r"""Survival probability function.
@@ -433,15 +439,17 @@ class twoside_chi2(object):
         r"""Logarithmic sf.
 
         """
-        return np.where(x > 0, np.log(self.eta) + self.f1.logsf(x),
-                               np.log(1. - self.eta) + self.f2.logcdf(-x))
+        return np.where(
+            x > 0, np.log(self.eta) + self.f1.logsf(x),
+            np.log(1. - self.eta) + self.f2.logcdf(-x))
 
     def isf(self, x):
         r"""Inverse survival function.
 
         """
-        return np.where(x < self.eta, self.f1.isf(x/self.eta),
-                                     -self.f2.ppf(1. - (1.-x)/(1.-self.eta)))
+        return np.where(
+            x < self.eta, self.f1.isf(x/self.eta),
+            -self.f2.ppf(1. - (1.-x)/(1.-self.eta)))
 
 
 def rotate(ra1, dec1, ra2, dec2, ra3, dec3):
@@ -465,9 +473,9 @@ def rotate(ra1, dec1, ra2, dec2, ra3, dec3):
     ra3 = np.atleast_1d(ra3)
     dec3 = np.atleast_1d(dec3)
 
-    assert(len(ra1) == len(dec1)
-                == len(ra2) == len(dec2)
-                == len(ra3) == len(dec3))
+    assert(
+        len(ra1) == len(dec1) == len(ra2) == len(dec2) == len(ra3) == len(dec3)
+        )
 
     alpha = np.arccos(np.cos(ra2 - ra1) * np.cos(dec1) * np.cos(dec2)
                       + np.sin(dec1) * np.sin(dec2))
