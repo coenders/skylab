@@ -133,101 +133,132 @@ def poisson_weight(vals, mean, weights=None):
 
 
 class delta_chi2(object):
-    """ A probability density function similar to scipy's rvs functions.
-    It consisist of a chi2 distribution plus a delta-distribution at zero.
+    """A probability density function similar to SciPy's rvs functions.
+
+    It consisist of a chi-square distribution plus a delta distribution
+    at zero.
+
+    Parameters
+    ----------
+    df : float
+        Number of degree of freedom
+    loc : float, optional
+        Shift probability density.
+    scale : float, optional
+        Scale probability density.
+
+    Attributes
+    ----------
+    f : rv_frozen
+        Underlying chi-square distribution
+    par : tuple(float)
+        Shape, location, and scale parameters of `f`
+    eta : float
+        Percentage of events larger than zero
+    eta_err : float
+        Uncertainty on `eta`
+    ks : float
+        KS test stastistic
 
     """
+    def __init__(self, df, loc=0., scale=1.):
+        self.f = chi2(df, loc, scale)
+        self.par = (df, loc, scale)
+        self.eta = np.nan
+        self.eta_err = np.nan
+        self.ks = np.nan
 
-    def __init__(self, data, **kwargs):
-        """ Constructor, evaluates the percentage of events equal to zero and
-        fits a chi2 to the rest of the data.
+    @classmethod
+    def fit(cls, data, seed, **kwargs):
+        r"""Evaluates the percentage of events equal to zero, fits a
+        chi-square distribution to the rest of the data, and performs a
+        KS test.
 
         Parameters
-        -----------
-        data : array
-            Data values to be fit
+        ----------
+        data : array_like
+            Probability density values
+        seed : float
+            Seeds for shape parameter `df`
+        \*\*kwargs
+            Keyword arguments passed to `chi2.fit`
+
+        Returns
+        -------
+        delta_chi2
+            Probability density function
 
         """
         data = np.asarray(data)
 
-        if len(data) == 2:
-            self.eta = data[0]
-            self.par = [data[1], 0., 1.]
+        pdf = cls(*chi2.fit(data[data > 0], [seed], **kwargs))
+        pdf.eta = float(np.count_nonzero(data > 0)) / len(data)
+        pdf.eta_err = np.sqrt(pdf.eta * (1. - pdf.eta) / len(data))
+        pdf.ks = kstest(data[data > 0], "chi2", args=pdf.par)[0]
 
-            self.eta_err = np.nan
-            self.ks = np.nan
-
-            self.f = chi2(*self.par)
-
-            return
-
-        self.par = chi2.fit(data[data > 0], **kwargs)
-
-        self.f = chi2(*self.par)
-
-        self.eta = float(np.count_nonzero(data > 0)) / len(data)
-        self.eta_err = np.sqrt(self.eta * (1. - self.eta) / len(data))
-
-        self.ks = kstest(data[data > 0], "chi2", args=self.par)[0]
-
-        return
+        return pdf
 
     def __getstate__(self):
-        return dict(par=self.par, eta=self.eta, eta_err=self.eta_err,
-                    ks=self.ks)
+        return dict(
+            par=self.par, eta=self.eta, eta_err=self.eta_err, ks=self.ks)
 
     def __setstate__(self, state):
-        for key, val in state.iteritems():
-            setattr(self, key, val)
+        for key in state:
+            setattr(self, key, state[key])
 
         self.f = chi2(*self.par)
 
-        return
-
     def __str__(self):
-        return ("Delta Distribution plus chi-square {0:s}\n".format(
-                    self.__repr__())
-               +"\tSeparation factor = {0:8.3%} +/- {1:8.3%}\n".format(
-                    self.eta, self.eta_err)
-               +"\t\tNDoF  = {0:6.2f}\n".format(self.par[0])
-               +"\t\tMean  = {0:6.2f}\n".format(self.par[1])
-               +"\t\tScale = {0:6.2f}\n".format(self.par[2])
-               +"\t\tKS    = {0:7.2%}".format(self.ks)
-               )
+        return (
+            "Delta Distribution plus chi-square {0:s}\n"
+            "\tSeparation factor = {1:8.3%} +/- {2:8.3%}\n"
+            "\t\tNDoF  = {3:6.2f}\n"
+            "\t\tMean  = {4:6.2f}\n"
+            "\t\tScale = {5:6.2f}\n"
+            "\t\tKS    = {6:7.2%}").format(
+                repr(self), self.eta, self.eta_err,
+                self.par[0], self.par[1], self.par[2], ks)
 
     def pdf(self, x):
-        """ Probability density function.
+        r"""Probability density function
+
         """
         return np.where(x > 0, self.eta * self.f.pdf(x), 1. - self.eta)
 
     def logpdf(self, x):
-        """ Logarithmic pdf.
+        r"""Logarithmic probability density function
+
         """
-        return np.where(x > 0, np.log(self.eta) + self.f.logpdf(x),
-                               np.log(1. - self.eta))
+        return np.where(
+            x > 0, np.log(self.eta) + self.f.logpdf(x), np.log(1. - self.eta))
 
     def cdf(self, x):
-        """ Probability mass function.
+        r"""Probability mass function
+
         """
         return (1. - self.eta) + self.eta * self.f1.cdf(x)
 
     def logcdf(self, x):
-        """ Logarithmic cdf.
+        r"""Logarithmic probability mass function
+
         """
         return np.log(1. - self.eta) + np.log(self.eta) + self.f1.logcdf(x)
 
     def sf(self, x):
-        """ Survival probability function.
+        r"""Survival probability function
+
         """
         return np.where(x > 0, self.eta * self.f.sf(x), 1.)
 
     def logsf(self, x):
-        """ Logarithmic sf.
+        r"""Logarithmic survival probability function
+
         """
         return np.where(x > 0, np.log(self.eta) + self.f.logsf(x), 0.)
 
     def isf(self, x):
-        """ Inverse survival function.
+        r"""Inverse survival function
+
         """
         return np.where(x < self.eta, self.f.isf(x/self.eta), 0.)
 
@@ -467,4 +498,3 @@ def rotate(ra1, dec1, ra2, dec2, ra3, dec3):
     ra += np.where(ra < 0., 2. * np.pi, 0.)
 
     return ra, dec
-
