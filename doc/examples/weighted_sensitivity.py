@@ -2,6 +2,8 @@
 
 from __future__ import print_function
 
+import os
+
 # SciPy
 from scipy.stats import chi2
 import healpy as hp
@@ -12,7 +14,7 @@ from scipy.signal import convolve2d
 from skylab.ps_injector import PointSourceInjector
 from skylab.psLLH import MultiPointSourceLLH
 from skylab.ps_model import UniformLLH
-from skylab.utils import poisson_weight
+from skylab.utils import delta_chi2, poisson_weight
 
 # local
 import utils
@@ -23,7 +25,8 @@ if __name__=="__main__":
     llh, mc = utils.startup()
     print(llh)
 
-    N = 10
+    # N = 10
+    N = 5
     Gamma = np.linspace(1., 4., N)
 
     fig, ax = plt.subplots()
@@ -34,26 +37,29 @@ if __name__=="__main__":
         if not energy:
             l += "o"
 
-            llh.llh_model = (UniformLLH(sinDec_bins=max(3, len(llh.exp) // 200),
-                                        sinDec_range=[-1., 1.]),
-                             mc)
+            model = UniformLLH(
+                sinDec_bins=max(3, len(llh.exp) // 200),
+                sinDec_range=[-1., 1.])
 
-        props = dict()
+            llh.set_llh_model(model, mc)
+
+        trials = llh.do_trials(np.pi, 0., n_iter=10000)
+        chi2 = delta_chi2.fit(trials["TS"], seed=2., floc=0., fscale=1.)
+
+        print(chi2)
+
+        ts = chi2.isf([0.5, 2.87e-7])
+
         sens = list()
         disc = list()
         for j, gamma in enumerate(Gamma):
             # init a injector class sampling events at a point source
             inj = PointSourceInjector(gamma, sinDec_bandwidth=1.)
+            inj.fill(0., mc, llh.livetime)
 
             # start calculation for dec = 0
-            result = llh.weighted_sensitivity(0., [0.5, 2.87e-7], [0.9, 0.5],
-                                              inj, mc,
-                                              n_bckg=10000,
-                                              n_iter=1000,
-                                              eps=1.e-2,
-                                              **props)
-
-            props["TSval"] = result["TSval"]
+            result = llh.weighted_sensitivity(
+                np.pi, 0., ts, [0.9, 0.5], inj, n_iter=1000, eps=1.e-2)[0]
 
             sens.append(result["mu"][0])
             disc.append(result["mu"][1])
@@ -67,6 +73,9 @@ if __name__=="__main__":
     ax.set_ylim(ymin=0.)
 
     ax.legend(loc="best")
+
+    if not os.path.exists("figures"):
+        os.makedirs("figures")
 
     fig.savefig("figures/nevents.pdf")
 
