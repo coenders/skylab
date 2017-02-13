@@ -260,6 +260,7 @@ class delta_chi2(object):
         r"""Inverse survival function
 
         """
+        x = np.asarray(x)
         return np.where(x < self.eta, self.f.isf(x/self.eta), 0.)
 
 
