@@ -668,8 +668,8 @@ class BaseLLH(object):
 
         return trials
 
-    def sensitivity(self, src_ra, src_dec, ts, beta, inj, n_iter=1000,
-                    eps=5e-3, trials=None, **kwargs):
+    def weighted_sensitivity(self, src_ra, src_dec, ts, beta, inj, n_iter=1000,
+                             eps=5e-3, trials=None, **kwargs):
         r"""Calculate sensitivity for a given source hypothesis.
 
         Generate signal trials by injecting events arriving from the
@@ -704,12 +704,16 @@ class BaseLLH(object):
 
         Returns
         -------
-        mu : ndarray
-            Number of injected signal events to fulfill sensitivity
-            criterion
+        sensitivity : ndarray
+            Structured array describing the number of injected signal
+            events ``mu`` and the corresponding differential ``flux`` to
+            fulfill sensitivity criterion
         trials : ndarray
-            Structured array containing previous and all newly generated
+            Structured array describing previous and all newly generated
             trials
+        weights : ndarray
+            Weight number of injected events to a Poisson distribution
+            given the sensitivity ``mu``.
 
         """
         # Let NumPy handle the broadcasting of ts and beta.
@@ -725,15 +729,21 @@ class BaseLLH(object):
 
         values = []
         for ts, beta in broadcast:
-            mu, trials = self._sensitivity(
+            mu, flux, trials = self._sensitivity(
                 src_ra, src_dec, ts, beta, inj, n_iter, eps, trials, **kwargs)
 
-            values.append(mu)
+            values.append((mu, flux))
 
-        mu = np.empty(broadcast.shape)
-        mu.flat = values
+        sensitivity = np.empty(
+            broadcast.shape, dtype=[("mu", np.float), ("flux", np.float)])
 
-        return mu, trials
+        sensitivity.flat = values
+
+        weights = np.vstack(
+            utils.poisson_weight(trials["n_inj"], mu)
+            for mu in sensitivity["mu"])
+
+        return sensitivity, trials, weights
 
     def _sensitivity(self, src_ra, src_dec, ts, beta, inj, n_iter, eps, trials,
                      **kwargs):
@@ -819,17 +829,19 @@ class BaseLLH(object):
         mins, secs = divmod(stop - start, 60)
         hours, mins = divmod(mins, 60)
 
+        flux = inj.mu2flux(mu)
+
         print("\tFinished after {0:3.0f}h {1:2.0f}' {2:4.2f}''.\n"
               "\t\tInjected: {3:6.2f}\n"
               "\t\tFlux    : {4:.2e}\n"
               "\t\tTrials  : {5:6d}\n"
               "\t\tTime    : {6:6.2f} trial(s) / sec\n".format(
-                  hours, mins, secs, mu, inj.mu2flux(mu), len(trials),
+                  hours, mins, secs, mu, flux, len(trials),
                   len(trials) / (stop - start)))
 
         sys.stdout.flush()
 
-        return mu, trials
+        return mu, flux, trials
 
     def _active_region(self, src_ra, src_dec, ts, beta, inj, n_iter, trials,
                        **kwargs):
