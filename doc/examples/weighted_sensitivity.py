@@ -14,7 +14,7 @@ from scipy.signal import convolve2d
 from skylab.ps_injector import PointSourceInjector
 from skylab.psLLH import MultiPointSourceLLH
 from skylab.ps_model import UniformLLH
-from skylab.utils import delta_chi2, poisson_weight
+from skylab.utils import FitDeltaChi2, poisson_weight
 
 # local
 import utils
@@ -44,7 +44,7 @@ if __name__=="__main__":
             llh.set_llh_model(model, mc)
 
         trials = llh.do_trials(np.pi, 0., n_iter=10000)
-        chi2 = delta_chi2.fit(trials["TS"], seed=2., floc=0., fscale=1.)
+        chi2 = FitDeltaChi2(df=2., floc=0., fscale=1.)fit(trials["TS"])
 
         print(chi2)
 
