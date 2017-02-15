@@ -941,7 +941,7 @@ class BaseLLH(object):
                 np.all(residuals > 0.)
                 )
 
-        mu = len(trials) * beta
+        mu = len(mts) * beta
         print("\tActive region: {0:5.1f}\n".format(mu))
 
         # Do trials around active region.
