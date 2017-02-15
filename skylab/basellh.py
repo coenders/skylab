@@ -253,7 +253,7 @@ class BaseLLH(object):
                 dout = np.logical_or(dec < dlow, dec > dup)
 
                 if np.all(dout):
-                    print("No scan points here")
+                    print("No scan points here.")
                     continue
 
                 threshold = np.percentile(
@@ -261,7 +261,7 @@ class BaseLLH(object):
 
                 tabove = pvalue >= threshold
 
-                print("{0:7.2%} above threshold pVal = {1:.2f}".format(
+                print("{0:7.2%} above threshold pVal = {1:.2f}.".format(
                       np.sum(tabove & ~dout) / (tabove.size - dout.sum()),
                       threshold))
 
@@ -273,7 +273,7 @@ class BaseLLH(object):
             area = hp.nside2pixarea(nside) / np.pi
 
             print("Scanning area of ~{0:4.2f}pi sr ({1:7.2%}, "
-                  "{2:d} pix)".format(nscan*area, nscan/mask.size, nscan))
+                  "{2:d} pix)...".format(nscan*area, nscan/mask.size, nscan))
 
             start = time.time()
 
@@ -286,7 +286,7 @@ class BaseLLH(object):
             mins, secs = divmod(stop - start, 60)
             hours, mins = divmod(mins, 60)
 
-            print("\tScan finished after {0:3d}h {1:2d}' {2:4.2f}''".format(
+            print("\tScan finished after {0:3d}h {1:2d}' {2:4.2f}''.".format(
                   int(hours), int(mins), secs))
 
             result = np.array(
@@ -357,11 +357,11 @@ class BaseLLH(object):
                 )
 
             if not np.any(mask):
-                print("{0:s}: No events here".format(key))
+                print("{0:s}: No events here.".format(key))
                 continue
 
             if not np.any(scan[mask]["nsources"] > 0):
-                print("{0:s}: No overfluctuation seen".format(key))
+                print("{0:s}: No overfluctuation seen.".format(key))
                 continue
 
             hotspot = np.sort(scan[mask], order=["pVal", "TS"])[-1]
@@ -508,7 +508,7 @@ class BaseLLH(object):
             if abs(fmin) > kwargs["pgtol"]:
                 print("Fitter returned positive value, force to be zero at "
                       "null-hypothesis. Minimum found {0} with fmin "
-                      "{1}".format(xmin, fmin))
+                      "{1}.".format(xmin, fmin))
 
             fmin = 0.
             xmin[0] = 0.
@@ -603,7 +603,7 @@ class BaseLLH(object):
 
         return fmin, pbest
 
-    def do_trials(self, src_ra, src_dec, n_iter=int(1e5), mu=None,
+    def do_trials(self, src_ra, src_dec, n_iter=100000, mu=None,
                   **kwargs):
         r"""Create trials of scrambled event maps to estimate the test
         statistic distribution.
@@ -668,13 +668,14 @@ class BaseLLH(object):
 
         return trials
 
-    def weighted_sensitivity(self, src_ra, src_dec, ts, beta, inj, n_iter=1000,
-                             eps=5e-3, trials=None, **kwargs):
+    def weighted_sensitivity(self, src_ra, src_dec, alpha, beta, inj, fit=None,
+                             TSval=None, eps=5e-3, n_iter=1000, n_bckg=100000,
+                             trials=None, **kwargs):
         r"""Calculate sensitivity for a given source hypothesis.
 
         Generate signal trials by injecting events arriving from the
         position of the source until a fraction `beta` of trials have a
-        test statistic larger than `ts`.
+        test statistic larger than the value corresponding to `alpha`.
 
         Parameters
         ----------
@@ -682,19 +683,30 @@ class BaseLLH(object):
             Right ascension of source position
         src_dec : float
             Declination of source position
-        ts : array_like
-            Test statistic that corresponds to the type I error with
-            respect to the background test statistic distribution
+        alpha : array_like
+            Type I error with respect to the background test statistic
+            distribution
         beta : array_like
-            Fraction of signal trials with a test static larger than
-            `ts`
+            Fraction of signal trials with a test statistic larger than
+            the value that corresponds to `alpha`
         inj : Injector
             Inject events arriving from the position of the source into
             the scrambled map.
-        n_iter : int, optional
-            Number of trials to per iteration
+        fit : object, optional
+            Background test statistic distribution; takes any Python
+            object with an `isf` method that returns test statistic
+            values given `alpha` or with a `fit` method that fits a
+            distribution to background trials and returns such an
+            object; defaults to `utils.FitDeltaChi2`.
+        TSval : array_like, optional
+            Instead of using `fit`, take pre-calculated test statistic
+            values that correspond to `alpha`.
         eps : float, optional
             Precision in `beta` for execution to break
+        n_iter : int, optional
+            Number of trials to per iteration
+        n_bckg : int, optional
+            If neeeded, generate `n_bckg` background trials.
         trials : ndarray, optional
             Structured array describing already performed trials,
             containing number of injected events ``n_inj``, test
@@ -716,34 +728,81 @@ class BaseLLH(object):
             given the sensitivity ``mu``.
 
         """
-        # Let NumPy handle the broadcasting of ts and beta.
-        broadcast = np.broadcast(ts, beta)
+        # Only flat arrays make sense here.
+        alpha = np.ravel(alpha)
+        ts = np.empty_like(alpha)
+
+        # Let NumPy handle the broadcasting of alpha, TSval, and beta.
+        broadcast = np.broadcast(alpha, ts, np.ravel(beta))
+
+        print("Estimate sensitivity for declination {0:5.2f}deg...".format(
+              np.rad2deg(src_dec)))
 
         if trials is None:
             dtype = [("n_inj", np.int), ("TS", np.float)]
             dtype.extend((p, np.float) for p in self.params)
             trials = np.empty((0, ), dtype=dtype)
 
-        print("Estimate sensitivity for declination {0:5.2f}deg.".format(
-              np.rad2deg(src_dec)))
+        if TSval is None:
+            # Assume that the test statistic distribution is given by fit,
+            # which defaults to a chi2-square distribution plus a delta
+            # distribution at zero.
+            if fit is None:
+                fit = utils.FitDeltaChi2(df=2., floc=0., fscale=1.)
 
+            # Fit distribution to background trials, if needed generate more
+            # background trials.
+            if hasattr(fit, "fit"):
+                ntrials = n_bckg - trials[trials["n_inj"] == 0].size
+
+                if ntrials > 0:
+                    print("\tDo background scrambles for estimation of TS "
+                          "values for alpha...")
+
+                    start = time.time()
+
+                    trials = np.append(
+                        trials, self.do_trials(
+                            src_ra, src_dec, n_iter=ntrials, **kwargs))
+
+                    stop = time.time()
+                    mins, secs = divmod(stop - start, 60)
+                    hours, mins = divmod(mins, 60)
+
+                    print("\t{0:6d} Background scrambles finished after "
+                          "{1:3d}h {2:2d}' {3:4.2f}''.".format(
+                            len(trials), int(hours), int(mins), secs))
+
+                print("\nFit background function to scrambles...")
+                fit = fit.fit(trials["TS"][trials["n_inj"] == 0])
+
+            # Give some information about the test statistic distribution.
+            print(fit)
+
+            ts[:] = fit.isf(alpha)
+        else:
+            # Take pre-cacluated test statistic values.
+            ts[:] = np.ravel(TSval)
+
+        # The actual sensitivity computation starts here.
         values = []
-        for ts, beta in broadcast:
+        for alpha, ts, beta in broadcast:
             mu, flux, trials = self._sensitivity(
                 src_ra, src_dec, ts, beta, inj, n_iter, eps, trials, **kwargs)
 
-            values.append((mu, flux))
+            values.append((alpha, ts, beta, mu, flux))
 
-        sensitivity = np.empty(
-            broadcast.shape, dtype=[("mu", np.float), ("flux", np.float)])
+        result = np.empty(
+            broadcast.shape,
+            dtype=[(k, np.float) for k in "alpha", "TS", "beta", "mu", "flux"])
 
-        sensitivity.flat = values
+        result.flat = values
 
         weights = np.vstack(
             utils.poisson_weight(trials["n_inj"], mu)
-            for mu in sensitivity["mu"])
+            for mu in result["mu"])
 
-        return sensitivity, trials, weights
+        return result, trials, weights
 
     def _sensitivity(self, src_ra, src_dec, ts, beta, inj, n_iter, eps, trials,
                      **kwargs):
@@ -777,7 +836,7 @@ class BaseLLH(object):
                     np.sum(trials["n_inj"] < 2)
 
             print("\tEstimate sensitivity in region {0:5.1f} to "
-                  "{1:5.1f}.".format(*bounds))
+                  "{1:5.1f}...".format(*bounds))
 
             def residual(n):
                 return np.log10((utils.poisson_percentile(
@@ -813,7 +872,7 @@ class BaseLLH(object):
                 mu_min = np.log(1. / (1. - p_bckg))
                 mu = np.amax([mu, mu_min])
 
-                print("\tDo {0:6d} trials with mu = {1:6.2f} events.".format(
+                print("\tDo {0:6d} trials with mu = {1:6.2f} events...".format(
                       n_iter, mu))
 
                 trials = np.append(
