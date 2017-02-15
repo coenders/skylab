@@ -17,8 +17,7 @@ if __name__ == "__main__":
     llh, mc = utils.startup()
     print(llh)
 
-    # N = 10
-    N = 5
+    N = 10
     Gamma = np.linspace(1., 4., N)
 
     fig, ax = plt.subplots()
@@ -46,7 +45,7 @@ if __name__ == "__main__":
             # start calculation for dec = 0
             result = llh.weighted_sensitivity(
                 np.pi, 0., [0.5, 2.87e-7], [0.9, 0.5], inj, TSval=ts,
-                n_iter=1000, eps=1e-2)[0]
+                n_iter=1000, n_bckg=10000, eps=1e-2)[0]
 
             ts = result["TS"]
             sens.append(result["mu"][0])
