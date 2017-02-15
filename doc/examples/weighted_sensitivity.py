@@ -4,22 +4,14 @@ from __future__ import print_function
 
 import os
 
-# SciPy
-from scipy.stats import chi2
-import healpy as hp
 import numpy as np
-from scipy.signal import convolve2d
 
-# skylab
 from skylab.ps_injector import PointSourceInjector
-from skylab.psLLH import MultiPointSourceLLH
 from skylab.ps_model import UniformLLH
-from skylab.utils import FitDeltaChi2, poisson_weight
 
-# local
 import utils
 
-if __name__=="__main__":
+if __name__ == "__main__":
     plt = utils.plotting(backend="pdf")
 
     llh, mc = utils.startup()
@@ -43,13 +35,7 @@ if __name__=="__main__":
 
             llh.set_llh_model(model, mc)
 
-        trials = llh.do_trials(np.pi, 0., n_iter=10000)
-        chi2 = FitDeltaChi2(df=2., floc=0., fscale=1.)fit(trials["TS"])
-
-        print(chi2)
-
-        ts = chi2.isf([0.5, 2.87e-7])
-
+        ts = None
         sens = list()
         disc = list()
         for j, gamma in enumerate(Gamma):
@@ -59,8 +45,10 @@ if __name__=="__main__":
 
             # start calculation for dec = 0
             result = llh.weighted_sensitivity(
-                np.pi, 0., ts, [0.9, 0.5], inj, n_iter=1000, eps=1.e-2)[0]
+                np.pi, 0., [0.5, 2.87e-7], [0.9, 0.5], inj, TSval=ts,
+                n_iter=1000, eps=1e-2)[0]
 
+            ts = result["TS"]
             sens.append(result["mu"][0])
             disc.append(result["mu"][1])
 
@@ -80,4 +68,3 @@ if __name__=="__main__":
     fig.savefig("figures/nevents.pdf")
 
     plt.show()
-
