@@ -22,7 +22,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # python packages
 from copy import deepcopy
 from itertools import product
-import logging
 
 # scipy-project imports
 import numpy as np
@@ -30,21 +29,7 @@ import scipy.interpolate
 from scipy.stats import norm
 
 # local package imports
-from . import set_pars
 from .utils import kernel_func
-
-# get module logger
-def trace(self, message, *args, **kwargs):
-    """ Add trace to logger with output level beyond debug
-    """
-    if self.isEnabledFor(5):
-        self._log(5, message, args, **kwargs)
-
-logging.addLevelName(5, "TRACE")
-logging.Logger.trace = trace
-
-logger = logging.getLogger(__name__)
-logger.addHandler(logging.StreamHandler())
 
 # default values for parameters
 
@@ -64,6 +49,25 @@ _precision = 0.1
 _par_val = np.nan
 _parab_cache = np.zeros((0, ), dtype=[("S1", np.float), ("a", np.float),
                                       ("b", np.float)])
+
+
+def set_pars(self, **kwargs):
+    r"""Constructor with basic settings needed in all LLH classes.
+
+    """
+    # Set all attributes passed, warn if private or not known.
+    for attr, value in kwargs.iteritems():
+        if not hasattr(self, attr):
+            print(">>>> {0:s} does not have attribute '{1:s}', "
+                  "skipping...".format(self.__repr__(), attr))
+
+            continue
+
+        if attr.startswith("_"):
+            print(">>>> _{0:s} should be considered private and "
+                  "for internal use only!".format(attr))
+
+        setattr(self, attr, value)
 
 
 class NullModel(object):
@@ -193,9 +197,9 @@ class ClassicLLH(NullModel):
         if np.any(hist <= 0.):
             bmids = (self.sinDec_bins[1:] + self.sinDec_bins[:-1]) / 2.
             estr = ("Declination hist bins empty, this must not happen! "
-                    +"Empty bins: {0}".format(bmids[hist <= 0.]))
+                    + "Empty bins: {0}".format(bmids[hist <= 0.]))
             raise ValueError(estr)
-        elif np.any((exp["sinDec"] < bins[0])|(exp["sinDec"] > bins[-1])):
+        elif np.any((exp["sinDec"] < bins[0]) | (exp["sinDec"] > bins[-1])):
             raise ValueError("Data outside of declination bins!")
 
         self._bckg_spline = scipy.interpolate.InterpolatedUnivariateSpline(
@@ -252,7 +256,8 @@ class ClassicLLH(NullModel):
     @bckg_spline.setter
     def bckg_spline(self, val):
         if not hasattr(val, "__call__"):
-            print(">>> WARNING: {0} is not callable! Not spline-ish".format(val))
+            print(">>> WARNING: {0} is not callable! Not "
+                  "spline-ish".format(val))
             return
 
         self._bckg_spline = val
@@ -338,9 +343,11 @@ class ClassicLLH(NullModel):
 
         """
         cos_ev = np.sqrt(1. - ev["sinDec"]**2)
-        cosDist = (np.cos(src_ra - ev["ra"])
-                            * np.cos(src_dec) * cos_ev
-                          + np.sin(src_dec) * ev["sinDec"])
+
+        cosDist = (
+            np.cos(src_ra - ev["ra"]) * np.cos(src_dec) * cos_ev +
+            np.sin(src_dec) * ev["sinDec"]
+            )
 
         # handle possible floating precision errors
         cosDist[np.isclose(cosDist, 1.) & (cosDist > 1)] = 1.
@@ -424,31 +431,29 @@ class WeightLLH(ClassicLLH):
         if np.all(np.asarray(kernel) == 0):
             # No smoothing
             self._XX = None
-        elif isinstance(kernel, (list, np.ndarray)):
-            kernel_arr = np.asarray(kernel)
-            assert(np.all(kernel_arr >= 0))
-            XX = np.meshgrid(*([kernel_arr for i in range(len(self.hist_pars)
-                                                          - self._ndim_norm)]
-                              + [[1] for i in range(self._ndim_norm)]))
-            self._XX = np.product(XX, axis=0).T
-        elif isinstance(kernel, int):
-            assert(kernel > 0)
-            kernel_arr = np.ones(2 * kernel + 1, dtype=np.float)
-            XX = np.meshgrid(*([kernel_arr for i in range(len(self.hist_pars)
-                                                          - self._ndim_norm)]
-                              + [[1] for i in range(self._ndim_norm)]))
-            self._XX = np.product(XX, axis=0).T
-        elif isinstance(kernel, float):
-            assert(kernel >= 1)
-            val = 1.6635
-            r = np.linspace(-val, val, 2 * int(kernel) + 1)
-            kernel_arr = norm.pdf(r)
-            XX = np.meshgrid(*([kernel_arr for i in range(len(self.hist_pars)
-                                                          - self._ndim_norm)]
-                              + [[1] for i in range(self._ndim_norm)]))
-            self._XX = np.product(XX, axis=0).T
         else:
-            raise ValueError("Kernel has to be positive int / float or array")
+            if isinstance(kernel, (list, np.ndarray)):
+                kernel_arr = np.asarray(kernel)
+                assert(np.all(kernel_arr >= 0))
+            elif isinstance(kernel, int):
+                assert(kernel > 0)
+                kernel_arr = np.ones(2 * kernel + 1, dtype=np.float)
+            elif isinstance(kernel, float):
+                assert(kernel >= 1)
+                val = 1.6635
+                r = np.linspace(-val, val, 2 * int(kernel) + 1)
+                kernel_arr = norm.pdf(r)
+            else:
+                raise ValueError(
+                    "Kernel has to be positive int / float or array")
+
+            XX = [kernel_arr for i in range(
+                len(self.hist_pars) - self._ndim_norm)]
+
+            XX.extend([[1] for i in range(self._ndim_norm)])
+
+            XX = np.meshgrid(*XX)
+            self._XX = np.product(XX, axis=0).T
 
         super(WeightLLH, self).__init__(*args, params=params, **kwargs)
 
@@ -548,7 +553,7 @@ class WeightLLH(ClassicLLH):
 
         if self._ndim_norm > 0:
             norms = np.sum(h, axis=tuple(range(h.ndim - self._ndim_norm)))
-            norms[norms==0] = 1.
+            norms[norms == 0] = 1.
 
             h /= norms
 
@@ -589,7 +594,7 @@ class WeightLLH(ClassicLLH):
 
         # values outside of the exp domain, but inside the MC one are mapped to
         # the most signal-like value
-        min_ratio = np.percentile(ratio[ratio>1.], _ratio_perc)
+        min_ratio = np.percentile(ratio[ratio > 1.], _ratio_perc)
         np.copyto(ratio, min_ratio, where=wSd & ~self._wB_domain)
 
         binmids = [(wSb_i[1:] + wSb_i[:-1]) / 2. for wSb_i in wSb]
@@ -726,8 +731,10 @@ class PowerLawLLH(WeightLLH):
     """
     def __init__(self, *args, **kwargs):
 
-        params = dict(gamma=(kwargs.pop("seed", _gamma_params["gamma"][0]),
-                             deepcopy(kwargs.pop("bounds", deepcopy(_gamma_params["gamma"][1])))))
+        params = dict(gamma=(
+            kwargs.pop("seed", _gamma_params["gamma"][0]),
+            deepcopy(kwargs.pop("bounds", deepcopy(_gamma_params["gamma"][1])))
+            ))
 
         super(PowerLawLLH, self).__init__(params, *args, **kwargs)
 
@@ -742,16 +749,17 @@ class PowerLawLLH(WeightLLH):
         gamma_vals = pars["gamma"]
 
         x = np.sin(mc["trueDec"])
-        hist = np.vstack([np.histogram(x,
-                                       weights=self._get_weights(mc, gamma=gm)
-                                                * livetime * 86400.,
-                                       bins=self.sinDec_bins)[0]
-                          for gm in gamma_vals]).T
+
+        hist = np.vstack([np.histogram(
+            x, weights=self._get_weights(mc, gamma=gm) * livetime * 86400.,
+            bins=self.sinDec_bins)[0] for gm in gamma_vals]).T
 
         # normalize bins by their binvolume, one dimension is the parameter
         # with width of *precision*
         bin_vol = np.diff(self.sinDec_bins)
-        hist /= bin_vol[:, np.newaxis] * np.full_like(gamma_vals, self._precision)
+
+        hist /= bin_vol[:, np.newaxis] * np.full_like(
+            gamma_vals, self._precision)
 
         self._spl_effA = scipy.interpolate.RectBivariateSpline(
                 (self.sinDec_bins[1:] + self.sinDec_bins[:-1]), gamma_vals,
@@ -871,5 +879,3 @@ class EnergyLLHfixed(EnergyLLH):
         print("EnergyLLH with FIXED splines used here, call has no effect")
 
         return
-
-
