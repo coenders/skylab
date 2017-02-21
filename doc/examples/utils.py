@@ -1,11 +1,15 @@
 # -*-coding:utf8-*-
 
+import logging
+
 import healpy as hp
 import numpy as np
 
 import data
 
 tw = 5.31
+
+logging.basicConfig(level=logging.WARN)
 
 def startup(NN=1, multi=False, **kwargs):
     n = 4

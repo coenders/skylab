@@ -2,6 +2,7 @@
 
 from __future__ import print_function
 
+import logging
 import os
 
 import numpy as np
@@ -10,6 +11,8 @@ from skylab.ps_injector import PointSourceInjector
 from skylab.ps_model import UniformLLH
 
 import utils
+
+logging.getLogger("skylab.psLLH.PointSourceLLH").setLevel(logging.INFO)
 
 if __name__ == "__main__":
     plt = utils.plotting(backend="pdf")

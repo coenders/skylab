@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import os
 import itertools
+import logging
 
 # SciPy
 from scipy.stats import chi2
@@ -19,9 +20,10 @@ from skylab.utils import poisson_weight
 # local
 import utils
 
+logging.getLogger("skylab.psLLH.PointSourceLLH").setLevel(logging.INFO)
+
 
 if __name__=="__main__":
-
     plt = utils.plotting(backend="pdf")
 
     # init likelihood class
@@ -146,4 +148,3 @@ if __name__=="__main__":
     plt.show()
 
     plt.close("all")
-

@@ -1,6 +1,7 @@
 # -*-coding:utf8-*-
 
 import os
+import logging
 
 # scipy
 from scipy.stats import chi2
@@ -13,6 +14,8 @@ from skylab.psLLH import MultiPointSourceLLH
 # local
 import utils
 
+logging.getLogger("skylab.psLLH.PointSourceLLH").setLevel(logging.INFO)
+
 # convert test statistic to a p-value for a given point
 pVal_func = lambda TS, dec: -np.log10(0.5 * (chi2(len(llh.params)).sf(TS)
                                              + chi2(len(llh.params)).cdf(-TS)))
@@ -21,6 +24,7 @@ label = dict(TS=r"$\mathcal{TS}$",
              nsources=r"$n_S$",
              gamma=r"$\gamma$",
              )
+
 
 if __name__=="__main__":
 
@@ -92,5 +96,3 @@ if __name__=="__main__":
 
         plt.show()
         plt.close("all")
-
-
