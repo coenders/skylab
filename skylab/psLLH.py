@@ -16,7 +16,10 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
-from __future__ import division, print_function
+from __future__ import division
+
+import logging
+import warnings
 
 import numpy as np
 import numpy.lib.recfunctions
@@ -93,9 +96,8 @@ class PointSourceLLH(basellh.BaseLLH):
         if scramble:
             exp["ra"] = self.random.uniform(0., 2.*np.pi, exp.size)
         else:
-            print("\t####################################\n"
-                  "\t# Working on >> UNBLINDED << data! #\n"
-                  "\t####################################\n")
+            logger = logging.getLogger(self._logname)
+            logger.warn("Working on >> UNBLINDED << data.")
 
         self.exp = exp
         self.livetime = livetime
@@ -127,16 +129,20 @@ class PointSourceLLH(basellh.BaseLLH):
             Instance of basic point source likelihood
 
         """
-        print("Upscale exp. data distribution!")
+        logname = "{0:s}.{1:s}".format(cls.__module__, cls.__name__)
+        logger = logging.getLogger(logname)
+
+        logger.info("Up-scale experimental data distribution.")
 
         # Draw number of events for up-scaling from Poisson distribution.
         scale = livetime[1] / livetime[0]
         random = np.random.RandomState(kwargs.get("seed", "None"))
         nevents = random.poisson(scale * exp.size)
 
-        print("\tSample {0:6d} events from exp. data "
-              "from {1:6.1f} to {2:6.1f} days (x {3:4.1f})".format(
-                  nevents, livetime[1], livetime[0], scale))
+        logger.info(
+            "Sample {0:d} events from experimental data from {1:.1f} to "
+            "{2:.1f} days (x {3:.1f}).".format(
+                nevents, livetime[1], livetime[0], scale))
 
         # Over-sample experimental data.
         exp = random.choice(exp, size=nevents)
@@ -264,7 +270,9 @@ class PointSourceLLH(basellh.BaseLLH):
         if (self._nselected < 1 and
                 np.sin(self._src_dec) < self.sinDec_range[0] and
                 np.sin(self._src_dec) > self.sinDec_range[-1]):
-            print("No event was selected, fit will go to -infinity")
+            warnings.warn(
+                "No event was selected, fit will go to -inf.",
+                RuntimeWarning)
 
     def llh(self, nsources, **others):
         SoB = self._signal / self._events["B"]
@@ -454,7 +462,8 @@ class MultiPointSourceLLH(basellh.BaseLLH):
 
         if name in names:
             enum = self._enums.keys()[names.index(name)]
-            print("Overwrite Sample {0:2d} - {1:s}".format(enum, name))
+            logger = logging.getLogger(self._logname)
+            logger.warn("Overwrite {0:d} - {1}".format(enum, name))
         else:
             if len(names) > 0:
                 enum = max(self._enums) + 1

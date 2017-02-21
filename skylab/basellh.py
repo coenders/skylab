@@ -16,13 +16,14 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
-from __future__ import division, print_function
+from __future__ import division
 
 import abc
+import datetime
 import itertools
+import logging
 import multiprocessing
-import sys
-import time
+import warnings
 
 import healpy as hp
 import numpy as np
@@ -35,12 +36,23 @@ from . import utils
 class BaseLLH(object):
     r"""Base class for unbinned point source log-likelihood functions
 
-    Derived classes must implement the methods `_select_events`, `llh`,
-    and the properties `params`, `par_seeds`, `par_bounds`, and
-    `sinDec_range`; check corresponding docs for more details.
+    Derived classes must implement the methods:
+
+        * `_select_events`,
+        * `llh`,
+
+    and the properties:
+
+        *`params`,
+        * `par_seeds`,
+        * `par_bounds`, and
+        * `sinDec_range`.
+
+    Check corresponding docs for more details.
 
     The private attributes `_src_ra` and `_src_dec` can be used to cache
-    the tested source position.
+    the tested source position. The private attribute `_logname` can be
+    used to get a reference to the base class logger.
 
     Parameters
     ----------
@@ -82,6 +94,11 @@ class BaseLLH(object):
         self._nselected = 0
         self._src_ra = np.inf
         self._src_dec = np.inf
+
+        # Use module name and class name of derived class for logging.
+        self._logname = "{0:s}.{1:s}".format(
+            self.__class__.__module__,
+            self.__class__.__name__)
 
     @abc.abstractmethod
     def _select_events(self, src_ra, src_dec, scramble=False, inject=None):
@@ -200,6 +217,8 @@ class BaseLLH(object):
         ...     return -numpy.log10(0.5 * scipy.stats.chi2(2.).sf(ts))
 
         """
+        logger = logging.getLogger(self._logname + ".all_sky_scan")
+
         if pVal is None:
             def pVal(ts, sindec):
                 return ts
@@ -221,10 +240,10 @@ class BaseLLH(object):
 
         niterations = 1
         while True:
-            print("Iteration {0:2d}\n"
-                  "\tGenerating equal distant points on skymap...\n"
-                  "\t\tNside = {1:4d}, resolution {2:4.2f} deg".format(
-                      niterations, nside, np.rad2deg(hp.nside2resol(nside))))
+            logger.info("Iteration {0:2d}".format(niterations))
+            logger.info("Generating equal distant points on sky map...")
+            logger.info("nside = {0:d}, resolution {1:.2f} deg".format(
+                nside, np.rad2deg(hp.nside2resol(nside))))
 
             # Create grid in declination and right ascension.
             # NOTE: HEALPy returns the zenith angle in equatorial coordinates.
@@ -242,18 +261,18 @@ class BaseLLH(object):
             # Scan only points above the p-value threshold per hemisphere. The
             # thresholds depend on what percentage of the sky is evaluated.
             ppoints = npoints / ts.size
-            print("Analysing {0:7.2%} of the scan...".format(ppoints))
+            logger.info("Analyse {0:.2%} of scan...".format(ppoints))
 
             mask = np.isfinite(ts) & (dec > drange[0]) & (dec < drange[-1])
 
             for dlow, dup in zip(dbound[:-1], dbound[1:]):
-                print("\tDec. {0:-5.1f} to {1:-5.1f} deg".format(
-                      *np.rad2deg([dlow, dup])), end=": ")
+                logger.info("dec = {0:.1f} to {1:.1f} deg".format(
+                    np.rad2deg(dlow), np.rad2deg(dup)))
 
                 dout = np.logical_or(dec < dlow, dec > dup)
 
                 if np.all(dout):
-                    print("No scan points here.")
+                    logger.warn("No scan points here.")
                     continue
 
                 threshold = np.percentile(
@@ -261,9 +280,10 @@ class BaseLLH(object):
 
                 tabove = pvalue >= threshold
 
-                print("{0:7.2%} above threshold pVal = {1:.2f}.".format(
-                      np.sum(tabove & ~dout) / (tabove.size - dout.sum()),
-                      threshold))
+                logger.info(
+                    "{0:.2%} above threshold p-value = {1:.2f}.".format(
+                        np.sum(tabove & ~dout) / (tabove.size - dout.sum()),
+                        threshold))
 
                 # Apply threshold mask only to points belonging to the current
                 # hemisphere.
@@ -272,22 +292,18 @@ class BaseLLH(object):
             nscan = mask.sum()
             area = hp.nside2pixarea(nside) / np.pi
 
-            print("Scanning area of ~{0:4.2f}pi sr ({1:7.2%}, "
-                  "{2:d} pix)...".format(nscan*area, nscan/mask.size, nscan))
+            logger.info(
+                "Scan area of {0:4.2f}pi sr ({1:.2%}, {2:d} pix)...".format(
+                    nscan * area, nscan / mask.size, nscan))
 
-            start = time.time()
+            time = datetime.datetime.now()
 
             # Here, the actual scan is done.
             ts, xmin = self._scan(ra[mask], dec[mask], ts, xmin, mask)
             pvalue = pVal(ts, np.sin(dec))
 
-            stop = time.time()
-
-            mins, secs = divmod(stop - start, 60)
-            hours, mins = divmod(mins, 60)
-
-            print("\tScan finished after {0:3d}h {1:2d}' {2:4.2f}''.".format(
-                  int(hours), int(mins), secs))
+            time = datetime.datetime.now() - time
+            logger.info("Finished after {0}.".format(time))
 
             result = np.array(
                 zip(ra, dec, theta, ts, pvalue),
@@ -298,13 +314,11 @@ class BaseLLH(object):
                 dtypes=[np.float for p in self.params], usemask=False)
 
             yield result, self._hotspot(
-                    result, nside, hemispheres, drange, pVal)
+                    result, nside, hemispheres, drange, pVal, logger)
 
-            print(67*"-")
-            print("\tNext follow up: nside = {0:d} * 2**{1:d} = {2:d}".format(
-                  nside, follow_up_factor, nside * 2**follow_up_factor))
-
-            sys.stdout.flush()
+            logger.info(
+                "Next follow-up: nside = {0:d} * 2**{1:d} = {2:d}".format(
+                    nside, follow_up_factor, nside * 2**follow_up_factor))
 
             nside *= 2**follow_up_factor
             niterations += 1
@@ -345,7 +359,7 @@ class BaseLLH(object):
 
         return ts, xmin
 
-    def _hotspot(self, scan, nside, hemispheres, drange, pVal):
+    def _hotspot(self, scan, nside, hemispheres, drange, pVal, logger):
         r"""Gather information about hottest spots in each hemisphere.
 
         """
@@ -357,27 +371,26 @@ class BaseLLH(object):
                 )
 
             if not np.any(mask):
-                print("{0:s}: No events here.".format(key))
+                logger.info("{0:s}: no events here.".format(key))
                 continue
 
             if not np.any(scan[mask]["nsources"] > 0):
-                print("{0:s}: No overfluctuation seen.".format(key))
+                logger.info("{0}: no over-fluctuation.".format(key))
                 continue
 
             hotspot = np.sort(scan[mask], order=["pVal", "TS"])[-1]
             seed = {p: hotspot[p] for p in self.params}
 
-            print(key)
-            print("Hottest Grid at ra = {0:6.1f}deg, dec = {1:6.1f}deg\n"
-                  "\twith pVal  = {2:4.2f}\n"
-                  "\tand TS     = {3:4.2f} at".format(
-                          np.rad2deg(hotspot["ra"]),
-                          np.rad2deg(hotspot["dec"]),
-                          hotspot["pVal"],
-                          hotspot["TS"]))
+            logger.info(
+                "{0}: hot spot at ra = {1:.1f} deg, dec = {2:.1f} deg".format(
+                    key, np.rad2deg(hotspot["ra"]),
+                    np.rad2deg(hotspot["dec"])))
 
-            print("\n".join(
-                "\t{0:10s} = {1:6.2f}".format(p, seed[p]) for p in seed))
+            logger.info("p-value = {0:.2f}, t = {1:.2f}".format(
+                hotspot["pVal"], hotspot["TS"]))
+
+            logger.info(
+                ",".join("{0} = {1:.2f}".format(p, seed[p]) for p in seed))
 
             result[key] = dict(grid=dict(
                 ra=hotspot["ra"],
@@ -395,16 +408,15 @@ class BaseLLH(object):
 
             pvalue = np.asscalar(pVal(fmin, np.sin(xmin["dec"])))
 
-            print("Refit location: ra = {0:6.1f}deg, dec = {1:6.1f}deg\n"
-                  "\twith pVal  = {2:4.2f}\n"
-                  "\tand TS     = {3:4.2f} at".format(
-                      np.rad2deg(xmin["ra"]),
-                      np.rad2deg(xmin["dec"]),
-                      pvalue,
-                      fmin))
+            logger.info(
+                "Re-fit location: ra = {0:.1f} deg, dec = {1:.1f} deg".format(
+                    np.rad2deg(xmin["ra"]), np.rad2deg(xmin["dec"])))
 
-            print("\n".join(
-                "\t{0:10s} = {1:6.2f}".format(p, xmin[p]) for p in seed))
+            logger.info("p-value = {0:.2f}, t = {1:.2f}".format(
+                pvalue, fmin))
+
+            logger.info(
+                ",".join("{0} = {1:.2f}".format(p, xmin[p]) for p in seed))
 
             result[key]["fit"] = dict(TS=fmin, pVal=pvalue)
             result[key]["fit"].update(xmin)
@@ -413,8 +425,6 @@ class BaseLLH(object):
                 result[key]["best"] = result[key]["grid"]
             else:
                 result[key]["best"] = result[key]["fit"]
-
-            sys.stdout.flush()
 
         return result
 
@@ -506,17 +516,20 @@ class BaseLLH(object):
         # negative; log only if the distance is too large.
         if fmin > 0. and (bounds[0][0] <= 0. and bounds[0][1] >= 0.):
             if abs(fmin) > kwargs["pgtol"]:
-                print("Fitter returned positive value, force to be zero at "
-                      "null-hypothesis. Minimum found {0} with fmin "
-                      "{1}.".format(xmin, fmin))
+                warnings.warn(
+                    "Fitter returned positive value, force to be zero at "
+                    "null-hypothesis. Minimum found {0} with fmin "
+                    "{1}.".format(xmin, fmin), RuntimeWarning)
 
             fmin = 0.
             xmin[0] = 0.
 
         if self._nevents > 0 and abs(xmin[0]) > self._rho_max*self._nselected:
-            print("nsources > {0:7.2%} * {1:6d} selected events, fit-value "
-                  "nsources = {2:8.1f}".format(
-                      self._rho_max, self._nselected, xmin[0]))
+            warnings.warn(
+                "nsources > {0:.2%} * {1:d} selected events, fit-value "
+                "nsources = {2:.1f}".format(
+                    self._rho_max, self._nselected, xmin[0]),
+                RuntimeWarning)
 
         pbest = dict(zip(self.params, xmin))
 
@@ -587,9 +600,11 @@ class BaseLLH(object):
             llh, params, bounds=bounds, approx_grad=True, **kwargs)
 
         if self._nevents > 0 and abs(xmin[0]) > self._rho_max*self._nselected:
-            print("nsources > {0:7.2%} * {1:6d} selected events, fit-value "
-                  "nsources = {2:8.1f}".format(
-                      self._rho_max, self._nselected, xmin[0]))
+            warnings.warn(
+                "nsources > {0:.2%} * {1:d} selected events, fit-value "
+                "nsources = {2:.1f}".format(
+                    self._rho_max, self._nselected, xmin[0]),
+                RuntimeWarning)
 
         pbest = dict(ra=xmin[0], dec=xmin[1])
         pbest.update(dict(zip(self.params, xmin[2:])))
@@ -706,7 +721,7 @@ class BaseLLH(object):
         n_iter : int, optional
             Number of trials to per iteration
         n_bckg : int, optional
-            If neeeded, generate `n_bckg` background trials.
+            If needed, generate `n_bckg` background trials.
         trials : ndarray, optional
             Structured array describing already performed trials,
             containing number of injected events ``n_inj``, test
@@ -717,9 +732,12 @@ class BaseLLH(object):
         Returns
         -------
         sensitivity : ndarray
-            Structured array describing the number of injected signal
-            events ``mu`` and the corresponding differential ``flux`` to
-            fulfill sensitivity criterion
+            Structured array describing the type I error ``alpha``, the
+            corresponding test statistic values ``TS``, the fraction of
+            signal trials with a test statistic larger than that
+            ``beta``, the number of injected signal events ``mu`` and
+            the corresponding differential ``flux`` to fulfill
+            sensitivity criterion
         trials : ndarray
             Structured array describing previous and all newly generated
             trials
@@ -728,6 +746,8 @@ class BaseLLH(object):
             given the sensitivity ``mu``.
 
         """
+        logger = logging.getLogger(self._logname + ".weighted_sensitivity")
+
         # Only flat arrays make sense here.
         alpha = np.ravel(alpha)
         ts = np.empty_like(alpha)
@@ -735,8 +755,8 @@ class BaseLLH(object):
         # Let NumPy handle the broadcasting of alpha, TSval, and beta.
         broadcast = np.broadcast(alpha, ts, np.ravel(beta))
 
-        print("Estimate sensitivity for declination {0:5.2f}deg...".format(
-              np.rad2deg(src_dec)))
+        logger.info("Estimate sensitivity for dec = {0:.1f} deg...".format(
+            np.rad2deg(src_dec)))
 
         if trials is None:
             dtype = [("n_inj", np.int), ("TS", np.float)]
@@ -756,28 +776,20 @@ class BaseLLH(object):
                 ntrials = n_bckg - trials[trials["n_inj"] == 0].size
 
                 if ntrials > 0:
-                    print("\tDo background scrambles for estimation of TS "
-                          "values for alpha...")
+                    logger.info("Do background scrambles...")
+                    time = datetime.datetime.now()
 
-                    start = time.time()
+                    trials = np.append(trials, self.do_trials(
+                        src_ra, src_dec, n_iter=ntrials, **kwargs))
 
-                    trials = np.append(
-                        trials, self.do_trials(
-                            src_ra, src_dec, n_iter=ntrials, **kwargs))
+                    time = datetime.datetime.now() - time
+                    logger.info("Finished after {0}.".format(time))
 
-                    stop = time.time()
-                    mins, secs = divmod(stop - start, 60)
-                    hours, mins = divmod(mins, 60)
-
-                    print("\t{0:6d} Background scrambles finished after "
-                          "{1:3d}h {2:2d}' {3:4.2f}''.".format(
-                            len(trials), int(hours), int(mins), secs))
-
-                print("\nFit background function to scrambles...")
+                logger.info("Fit background function...")
                 fit = fit.fit(trials["TS"][trials["n_inj"] == 0])
 
             # Give some information about the test statistic distribution.
-            print(fit)
+            # logger.info(str(fit))
 
             ts[:] = fit.isf(alpha)
         else:
@@ -788,7 +800,8 @@ class BaseLLH(object):
         values = []
         for alpha, ts, beta in broadcast:
             mu, flux, trials = self._sensitivity(
-                src_ra, src_dec, ts, beta, inj, n_iter, eps, trials, **kwargs)
+                src_ra, src_dec, ts, beta, inj, n_iter, eps, trials, logger,
+                **kwargs)
 
             values.append((alpha, ts, beta, mu, flux))
 
@@ -805,11 +818,9 @@ class BaseLLH(object):
         return result, trials, weights
 
     def _sensitivity(self, src_ra, src_dec, ts, beta, inj, n_iter, eps, trials,
-                     **kwargs):
-        start = time.time()
-
-        print("\tTS    = {0:6.2f}\n"
-              "\tbeta  = {1:7.2%}\n".format(ts, beta))
+                     logger, **kwargs):
+        time = datetime.datetime.now()
+        logger.info("t = {0:.2f}, beta = {1:.2%}".format(ts, beta))
 
         # If no events have been injected, do a quick an estimation of active
         # region by doing a few trials.
@@ -818,7 +829,8 @@ class BaseLLH(object):
                 not np.any(trials["TS"][trials["n_inj"] > 0] > 2.*ts)):
 
             trials = self._active_region(
-                src_ra, src_dec, ts, beta, inj, n_iter, trials, **kwargs)
+                src_ra, src_dec, ts, beta, inj, n_iter, trials, logger,
+                **kwargs)
 
         # Calculate number of injected events needed so that beta percent of
         # the trials have a test statistic larger than ts. Fit closest point
@@ -835,8 +847,9 @@ class BaseLLH(object):
                 bounds[0] = np.count_nonzero(trials["n_inj"] == 1) /\
                     np.sum(trials["n_inj"] < 2)
 
-            print("\tEstimate sensitivity in region {0:5.1f} to "
-                  "{1:5.1f}...".format(*bounds))
+            logger.info(
+                "Estimate sensitivity in region {0:.1f} to {1:.1f}...".format(
+                    *bounds))
 
             def residual(n):
                 return np.log10((utils.poisson_percentile(
@@ -853,8 +866,9 @@ class BaseLLH(object):
             b, b_err = utils.poisson_percentile(
                 mu, trials["n_inj"], trials["TS"], ts)
 
-            print("\t\tBest estimate: {0:6.2f}, "
-                  "({1:7.2%} +/- {2:8.3%})".format(mu, b, b_err))
+            logger.info(
+                "Best estimate: mu = {0:.2f} ({1:.2%} +/- {2:.2%})".format(
+                    mu, b, b_err))
 
             # If precision is high enough and fit did converge, the wanted
             # value is reached and we can stop the trial computation after this
@@ -872,8 +886,9 @@ class BaseLLH(object):
                 mu_min = np.log(1. / (1. - p_bckg))
                 mu = np.amax([mu, mu_min])
 
-                print("\tDo {0:6d} trials with mu = {1:6.2f} events...".format(
-                      n_iter, mu))
+                logger.info(
+                    "Do {0:d} trials with mu = {1:.2f} events...".format(
+                        n_iter, mu))
 
                 trials = np.append(
                     trials, self.do_trials(
@@ -882,36 +897,25 @@ class BaseLLH(object):
 
             niterations += 1
 
-            sys.stdout.flush()
-
-        stop = time.time()
-        mins, secs = divmod(stop - start, 60)
-        hours, mins = divmod(mins, 60)
-
+        time = datetime.datetime.now() - time
         flux = inj.mu2flux(mu)
 
-        print("\tFinished after {0:3.0f}h {1:2.0f}' {2:4.2f}''.\n"
-              "\t\tInjected: {3:6.2f}\n"
-              "\t\tFlux    : {4:.2e}\n"
-              "\t\tTrials  : {5:6d}\n"
-              "\t\tTime    : {6:6.2f} trial(s) / sec\n".format(
-                  hours, mins, secs, mu, flux, len(trials),
-                  len(trials) / (stop - start)))
-
-        sys.stdout.flush()
+        logger.info("Finished after {0}.".format(time))
+        logger.info("mu = {0:.2f}, flux = {1:.2e}".format(mu, flux))
+        logger.info("trials = {0} ({1:.2f} / sec)".format(
+            len(trials), len(trials) / time.seconds))
 
         return mu, flux, trials
 
     def _active_region(self, src_ra, src_dec, ts, beta, inj, n_iter, trials,
-                       **kwargs):
+                       logger, **kwargs):
         if len(trials) > 0:
             n_inj = int(np.mean(trials["n_inj"]))
         else:
             n_inj = 0
 
-        print("Quick estimate of active region, inject increasing "
-              "number of events, starting with {0:d} "
-              "events...".format(n_inj + 1))
+        logger.info("Quick estimate of active region...")
+        logger.info("Start with {0:d} events.".format(n_inj + 1))
 
         stop = False
         while not stop:
@@ -942,7 +946,7 @@ class BaseLLH(object):
                 )
 
         mu = len(mts) * beta
-        print("\tActive region: {0:5.1f}\n".format(mu))
+        logger.info("Active region: mu = {0:.1f}".format(mu))
 
         # Do trials around active region.
         trials = np.append(
@@ -977,11 +981,11 @@ class BaseLLH(object):
         Returns
         -------
         ndarray
-            Structured array describing effective right ascension ``ra``
-            corrected for curvature, right ascension ``x``, declination
-            ``dec``, test statistic ``TS``, p-value ``pVal``, and
-            best-fit values for `params` on the two-dimensional grid
-            declination versus right ascension
+            Structured array describing right ascension ``ra``,
+            effective right ascension corrected for curvature ``x``,
+            declination ``dec``, test statistic ``TS``, p-value
+            ``pVal``, and best-fit values for `params` on the
+            two-dimensional grid declination versus right ascension
 
         Note
         ----
@@ -989,6 +993,8 @@ class BaseLLH(object):
         internally.
 
         """
+        logger = logging.getLogger(self._logname + ".window_scan")
+
         if pVal is None:
             def pVal(ts, sindec):
                 return ts
@@ -1000,7 +1006,7 @@ class BaseLLH(object):
         # Shift window to source location; adjust right ascension for curvature
         # and periodicity.
         dec = np.ravel(src_dec + dec)
-        dra = np.ravel(dra / np.cos(dec))
+        dra = np.ravel(dra) / np.cos(dec)
         ra = src_ra + dra
         mra = np.mod(ra - 2.*np.pi, 2.*np.pi)
 
@@ -1031,7 +1037,7 @@ class BaseLLH(object):
 
         # Minimize negative log-likelihood function for scan point.
         results = np.empty_like(seeds, dtype=dtype)
-        start = time.time()
+        time = datetime.datetime.now()
 
         for i in range(mra.size):
             if dec[i] < -np.pi/2. or dec[i] > np.pi/2.:
@@ -1076,11 +1082,10 @@ class BaseLLH(object):
             for key in pbest:
                 results[key][i] = pbest[key]
 
-            stop = time.time()
-            mins, secs = divmod(stop - start, 60)
+            time = datetime.datetime.now() - time
 
-            print("\t{0:7.2%} after {1:2.0f}' {2:4.1f}'' ({3:8d} of "
-                  "{4:8d})".format((i+1)/mra.size, mins, secs, i+1, mra.size))
+            logger.info("{0:.2%} after {1} ({2:d} of {3:d})".format(
+                (i + 1) / mra.size, time, i + 1, mra.size))
 
         results = numpy.lib.recfunctions.append_fields(
             results, names=["ra", "dec", "x"],
