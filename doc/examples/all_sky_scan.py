@@ -1,5 +1,8 @@
 # -*-coding:utf8-*-
 
+import os
+import logging
+
 # scipy
 from scipy.stats import chi2
 import healpy as hp
@@ -11,6 +14,8 @@ from skylab.psLLH import MultiPointSourceLLH
 # local
 import utils
 
+logging.getLogger("skylab.psLLH.PointSourceLLH").setLevel(logging.INFO)
+
 # convert test statistic to a p-value for a given point
 pVal_func = lambda TS, dec: -np.log10(0.5 * (chi2(len(llh.params)).sf(TS)
                                              + chi2(len(llh.params)).cdf(-TS)))
@@ -19,6 +24,7 @@ label = dict(TS=r"$\mathcal{TS}$",
              nsources=r"$n_S$",
              gamma=r"$\gamma$",
              )
+
 
 if __name__=="__main__":
 
@@ -32,7 +38,7 @@ if __name__=="__main__":
     for i, (scan, hotspot) in enumerate(llh.all_sky_scan(
                                 nside=2**6, follow_up_factor=1,
                                 pVal=pVal_func,
-                                decRange=np.radians([-90., 90.]))):
+                                hemispheres=dict(Full=np.radians([-90., 90.])))):
 
         if i > 0:
             # break after first follow up
@@ -43,7 +49,12 @@ if __name__=="__main__":
 
     eps = 1.
 
-    fig, ax = utils.skymap(plt, scan["pVal"], cmap=utils.cmaps["magma"],
+    if hasattr(plt.cm, "magma"):
+        cmap = plt.cm.magma
+    else:
+        cmap = None
+
+    fig, ax = utils.skymap(plt, scan["pVal"], cmap=cmap,
                            vmin=0., vmax=np.ceil(hotspot["Full"]["best"]["pVal"]),
                            colorbar=dict(title=r"$-\log_{10}\rm p$"),
                            rasterized=True)
@@ -61,6 +72,8 @@ if __name__=="__main__":
                    color=plt.gca()._get_lines.color_cycle.next(),
                    alpha=0.2)#, rasterized=True)
     '''
+    if not os.path.exists("figures"):
+        os.makedirs("figures")
 
     fig.savefig("figures/skymap_pVal.pdf", dpi=256)
 
@@ -74,7 +87,7 @@ if __name__=="__main__":
         vmax = min(8, np.ceil(vmax))
         q = np.ma.masked_array(scan[key])
         q.mask = ~(scan["nsources"] > 0.5) if key != "TS" else np.zeros_like(q, dtype=np.bool)
-        fig, ax = utils.skymap(plt, q, cmap=utils.cmaps["magma"],
+        fig, ax = utils.skymap(plt, q, cmap=cmap,
                                vmin=vmin, vmax=vmax,
                                colorbar=dict(title=label[key]),
                                rasterized=True)
@@ -83,5 +96,3 @@ if __name__=="__main__":
 
         plt.show()
         plt.close("all")
-
-

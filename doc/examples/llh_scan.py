@@ -2,6 +2,10 @@
 
 from __future__ import print_function
 
+import os
+import itertools
+import logging
+
 # SciPy
 from scipy.stats import chi2
 import healpy as hp
@@ -16,9 +20,10 @@ from skylab.utils import poisson_weight
 # local
 import utils
 
+logging.getLogger("skylab.psLLH.PointSourceLLH").setLevel(logging.INFO)
+
 
 if __name__=="__main__":
-
     plt = utils.plotting(backend="pdf")
 
     # init likelihood class
@@ -32,12 +37,15 @@ if __name__=="__main__":
 
     # energy
     fig_E, ax_E = plt.subplots()
+
+    colors = ["#d7191c", "#2b83ba", "#756bb1", "#fdae61", "#abdda4"]
+    colcycle = itertools.cycle(colors)
+
     h, b, p = ax_E.hist([llh.exp["logE"]] + [mc["logE"] for i in gamma],
                         weights=[np.ones(len(llh.exp))]
                                  + [mc["ow"] * mc["trueE"]**(-g) for g in gamma],
                         label=["Data"] + [r"$\gamma={0:.1f}$".format(g) for g in gamma],
-                        color=["black"]
-                        + [ax_E._get_lines.color_cycle.next() for i in range(len(gamma))],
+                        color=["black"] + [colcycle.next() for i in range(len(gamma))],
                         histtype="step", bins=25, log=True, normed=True)
     ax_E.legend(loc="best")
 
@@ -50,18 +58,22 @@ if __name__=="__main__":
 
     # mrs
     fig_p, ax_p = plt.subplots()
+    colcyle = itertools.cycle(colors)
+
     h, b, p = ax_p.hist([np.degrees(llh.exp["sigma"])]
                         + [np.degrees(mc["sigma"]) for i in gamma],
                         weights=[np.ones(len(llh.exp))]
                                  + [mc["ow"] * mc["trueE"]**(-g) for g in gamma],
                         label=["Data"] + [r"$\gamma={0:.1f}$".format(g) for g in gamma],
-                        color=["black"]
-                        + [ax_p._get_lines.color_cycle.next() for i in range(len(gamma))],
+                        color=["black"] + [colcycle.next() for i in range(len(gamma))],
                         histtype="step", bins=25, normed=True)
     ax_p.legend(loc="best")
 
     ax_p.set_xlabel("Sigma / $1^\circ$")
     ax_p.set_ylabel("Probability Density")
+
+    if not os.path.exists("figures"):
+        os.makedirs("figures")
 
     fig_E.savefig("figures/energy.pdf")
     fig_p.savefig("figures/mrs.pdf")
@@ -71,6 +83,7 @@ if __name__=="__main__":
     ### LLH SCAN ###
 
     fig, ax = plt.subplots()
+    colcyle = itertools.cycle(colors)
 
     for mu, Gamma in zip([20, 40, 30], gamma):
         print("\tgamma =", Gamma)
@@ -88,7 +101,7 @@ if __name__=="__main__":
 
         for i in range(ntrials):
             # Inject always the same number of events for this plot
-            n_inj, inject = inj.sample(mu, poisson=False).next()
+            n_inj, inject = inj.sample(np.pi, mu, poisson=False).next()
 
             TS, xmin = llh.fit_source(np.pi, 0., inject=inject)
 
@@ -113,12 +126,12 @@ if __name__=="__main__":
 
         xmin, ymin = np.unravel_index(np.argmin(T), T.shape)
 
-        col = ax._get_lines.color_cycle.next()
-        ax.contour(nsources[:-1], gamma[:-1], T.T, levels=[2.3, 4.6],
-                   colors=col, linestyles=["dashed", "solid"],
+        col = colcyle.next()
+        ax.contour(nsources[:-1], gamma[:-1], T.T, levels=[2.3, 4.6], colors=col,
+                   linestyles=["dashed", "solid"],
                    antialiased=True)
         ax.scatter(nsources[xmin], gamma[ymin], marker="x", color=col)
-        ax.scatter(mu, Gamma, marker="o", color=col, label=r"$\gamma={0:.1f}$".format(Gamma))
+        ax.scatter(mu, Gamma, marker="o", label=r"$\gamma={0:.1f}$".format(Gamma), color=col)
 
     ax.set_xlim(0, 70)
 
@@ -135,4 +148,3 @@ if __name__=="__main__":
     plt.show()
 
     plt.close("all")
-

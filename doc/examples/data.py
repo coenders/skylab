@@ -78,7 +78,7 @@ def init(Nexp, NMC, energy=True, **kwargs):
         inj = PointSourceInjector(2, sinDec_bandwidth=1, seed=0)
         inj.fill(0., arr_mc, 333.)
 
-        source = inj.sample(Nsrc, poisson=False).next()[1]
+        source = inj.sample(np.pi, Nsrc, poisson=False).next()[1]
 
         arr_exp = np.append(arr_exp, source)
 
@@ -94,8 +94,7 @@ def init(Nexp, NMC, energy=True, **kwargs):
                                sinDec_range=[-1., 1.])
 
     llh = PointSourceLLH(arr_exp, arr_mc, 365., llh_model=llh_model,
-                         mode="all", hemispheres=dict(Full=[-np.inf, np.inf]),
-                         nsource=25, scramble=False,
+                         mode="all", nsource=25, scramble=False,
                          nsource_bounds=(-Nexp / 2., Nexp / 2.)
                                         if not energy else (0., Nexp / 2.),
                          seed=np.random.randint(2**32),
@@ -106,8 +105,7 @@ def init(Nexp, NMC, energy=True, **kwargs):
 def multi_init(n, Nexp, NMC, **kwargs):
     energy = kwargs.pop("energy", False)
 
-    llh = MultiPointSourceLLH(hemispheres=dict(Full=[-np.inf, np.inf]),
-                              nsource=25,
+    llh = MultiPointSourceLLH(nsource=25,
                               nsource_bounds=(-Nexp / 2., Nexp / 2.)
                                              if not energy else (0., Nexp / 2.),
                               seed=np.random.randint(2**32),

@@ -19,30 +19,44 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
 SkyLab
+======
 
-=====
-
-SkyLab is a project for unbinned Likelihood analyses of point source searches
-as performed by Neutrino Telescopes like ANTARES or IceCube.
+SkyLab is a project for unbinned likelihood analyses of point source
+searches as performed by Neutrino telescopes like ANTARES or IceCube.
 
 Requirements
 ------------
-    numpy (1.8 or higher needed for coordinate transformations)
-    scipy (Versions earlier than 0.14.0 will produce lots of output)
-    healpy
-    pySLALIB (for coordinate transformations)
-    matplotlib 1.3.1 or higher
+
+* healpy
+* numpy 1.8 or higher
+* scipy 0.14.0 or higher
 
 Contents
 --------
-    psLLH       -   Pointsource Likelihood calculation and sensitivity
-                    calculation
-    ps_model    -   Likelihood models for use in psLLH
-    ps_injector -   Source injectors for use in psLLH sensitivity estimation
-    utils       -   Helping functions for other content that is not supported
-                    in other libraries
+
+basellh
+    Base class for likelihood implementations; provides methods for
+    sensitivity calculation
+
+psLLH
+    Likelihood implementations for single or multi-year analyses
+
+grbllh
+    Likelihood implementation for gamma-ray burst analyses
+
+ps_model
+    Likelihood models
+
+ps_injector
+    Source injectors for sensitivity caclulation
+
+utils
+    Helping functions
 
 """
+import logging
+
+__all__ = ["basellh", "psLLH", "grbllh", "ps_model", "ps_injector", "utils"]
 
 __author__ = "Stefan Coenders"
 __version__ = "1.0"
@@ -50,31 +64,4 @@ __maintainer__ = "Stefan Coenders"
 __email__ = "stefan.coenders@tum.de"
 __status__ = "Development"
 
-from glob import glob
-import os
-
-# Import PlotParser and all libraries in external python files
-__all__ = [os.path.basename(f)[:-3]
-            for f in glob(os.path.join(os.path.dirname(__file__), "*.py"))
-            if not f.endswith("__init__.py")]
-del f
-
-def set_pars(self, **kwargs):
-    r"""Constructor with basic settings needed in all LLH classes.
-
-    """
-
-    # Set all attributes passed, warn if private or not known
-    for attr, value in kwargs.iteritems():
-        if not hasattr(self, attr):
-            print((">>>> {0:s} does not have attribute '{1:s}', "+
-                   "skipping...").format(self.__repr__(), attr))
-            continue
-        if attr.startswith("_"):
-            print((">>>> _{0:s} should be considered private and "+
-                   "for internal use only!").format(attr))
-        setattr(self, attr, value)
-
-    return
-
-
+logging.getLogger(__name__).addHandler(logging.NullHandler())

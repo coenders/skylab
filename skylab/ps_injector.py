@@ -1,9 +1,6 @@
 # -*-coding:utf8-*-
 
-from __future__ import print_function
-
-"""
-This file is part of SkyLab
+r"""This file is part of SkyLab
 
 Skylab is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -18,305 +15,198 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-ps_injector
-===========
-
-Point Source Injection classes. The interface with the core
-PointSourceLikelihood - Class requires the methods
-
-    fill - Filling the class with Monte Carlo events
-
-    sample - get a weighted sample with mean number `mu`
-
-    flux2mu - convert from a flux to mean number of expected events
-
-    mu2flux - convert from a mean number of expected events to a flux
 
 """
+from __future__ import division
 
-# python packages
+import abc
 import logging
 
-# scipy-project imports
 import numpy as np
-from numpy.lib.recfunctions import drop_fields
+import numpy.lib.recfunctions
 import scipy.interpolate
 
+from . import utils
 
-# local package imports
-from . import set_pars
-from .utils import rotate
-
-# get module logger
-def trace(self, message, *args, **kwargs):
-    r""" Add trace to logger with output level beyond debug
-
-    """
-    if self.isEnabledFor(5):
-        self._log(5, message, args, **kwargs)
-
-logging.addLevelName(5, "TRACE")
-logging.Logger.trace = trace
-
-logger = logging.getLogger(__name__)
-logger.addHandler(logging.StreamHandler())
-
-_deg = 4
-_ext = 3
 
 def rotate_struct(ev, ra, dec):
-    r"""Wrapper around the rotate-method in skylab.utils for structured
-    arrays.
+    r"""Wrapper around `utils.rotated` for structured arrays
 
     Parameters
     ----------
-    ev : structured array
-        Event information with ra, sinDec, plus true information
-
-    ra, dec : float
-        Coordinates to rotate the true direction onto
+    ev : ndarray
+        Structured array describing events that will be rotated
+    ra : float
+        Right ascension of direction events will be rotated on
+    dec : float
+        Declination of direction events will be rotated on
 
     Returns
     --------
-    ev : structured array
-        Array with rotated value, true information is deleted
+    ndarray:
+        Structured array describing rotated events; true information are
+        deleted.
 
     """
-    names = ev.dtype.names
-
     rot = np.copy(ev)
 
-    # Function call
-    rot["ra"], rot_dec = rotate(ev["trueRa"], ev["trueDec"],
-                                ra * np.ones(len(ev)), dec * np.ones(len(ev)),
-                                ev["ra"], np.arcsin(ev["sinDec"]))
+    rot["ra"], rot_dec = utils.rotate(
+        ev["trueRa"], ev["trueDec"], ra * np.ones(len(ev)),
+        dec * np.ones(len(ev)), ev["ra"], np.arcsin(ev["sinDec"]))
 
-    if "dec" in names:
+    if "dec" in ev.dtype.names:
         rot["dec"] = rot_dec
+
     rot["sinDec"] = np.sin(rot_dec)
 
-    # "delete" Monte Carlo information from sampled events
+    # Delete Monte Carlo information from sampled events.
     mc = ["trueRa", "trueDec", "trueE", "ow"]
 
-    return drop_fields(rot, mc)
+    return numpy.lib.recfunctions.drop_fields(rot, mc)
 
 
 class Injector(object):
-    r"""Base class for Signal Injectors defining the essential classes needed
-    for the LLH evaluation.
+    r"""Base class for signal injectors
+
+    Derived classes must implement the methods:
+
+        * `fill`
+        * `flux2mu`,
+        * `mu2flux`, and
+        * `sample`.
+
+    The base constructor declares the private attribute `_logging` that
+    can used to log messages.
 
     """
+    __metaclass__ = abc.ABCMeta
 
-    def __init__(self, *args, **kwargs):
-        r"""Constructor: Define general point source features here...
+    def __init__(self):
+        # Use module name and class name of derived class for logging.
+        self._logging = logging.getLogger("{0:s}.{1:s}".format(
+            self.__class__.__module__, self.__class__.__name__))
 
-        """
-        self.__raise__()
-
-    def __raise__(self):
-        raise NotImplementedError("Implemented as abstract in {0:s}...".format(
-                                    self.__repr__()))
-
+    @abc.abstractmethod
     def fill(self, *args, **kwargs):
-        r"""Filling the injector with the sample to draw from, work only on
-        data samples known by the LLH class here.
+        r"""Fill injector with sample(s) to draw events from.
 
         """
-        self.__raise__()
+        pass
 
-    def flux2mu(self, *args, **kwargs):
-        r"""Internal conversion from fluxes to event numbers.
+    @abc.abstractmethod
+    def flux2mu(self, flux):
+        r"""Convert flux to mean number of expected events.
+
+        Parameters
+        ----------
+        flux : float
+            Neutrino flux
+
+        Returns
+        -------
+        float:
+            Mean number of expected neutrino events given `flux`
 
         """
-        self.__raise__()
+        pass
 
-    def mu2flux(self, *args, **kwargs):
-        r"""Internal conversion from mean number of expected neutrinos to
-        point source flux.
+    @abc.abstractmethod
+    def mu2flux(self, mu):
+        r"""Calculate source flux given `mu`.
+
+        Parameters
+        ----------
+        mu : float
+            Mean number of source neutrino events
+
+        Returns
+        -------
+        float:
+            Source flux given `mu`
 
         """
-        self.__raise__()
+        pass
 
+    @abc.abstractmethod
     def sample(self, *args, **kwargs):
-        r"""Generator method that returns sampled events. Best would be an
-        infinite loop.
+        r"""Generator method that returns sampled events.
 
         """
-        self.__raise__()
+        pass
 
 
 class PointSourceInjector(Injector):
-    r"""Class to inject a point source into an event sample.
+    r"""Single point source injector
+
+    The source's energy spectrum follows a power law.
+
+    .. math::
+
+        \frac{\mathrm{d}\Phi}{\mathrm{d}E} =
+            \Phi_{0} E_{0}^{2 - \gamma}
+            \left(\frac{E}{E_{0}}\right)^{-\gamma}
+
+    By this definiton, the flux is equivalent to a power law with a
+    spectral index of two at the normalization energy ``E0*GeV``GeV.
+    The flux is given in units GeV^{\gamma - 1} s^{-1} cm^{-2}.
+
+    Parameters
+    ----------
+    seed : int, optional
+        Random seed initializing the pseudo-random number generator.
+
+    Attributes
+    -----------
+    gamma : float
+        Spectral index; use positive values for falling spectrum.
+    sinDec_range : tuple(float)
+        Shrink allowed declination range.
+    sinDec_bandwith : float
+        Select events inside declination band around source position.
+    src_dec : float
+        Declination of source position
+    e_range : tuple(float)
+        Select events only in a certain energy range.
+    random : RandomState
+        Pseudo-random number generator
 
     """
-    _src_dec = np.nan
-    _sinDec_bandwidth = 0.1
-    _sinDec_range = [-1., 1.]
+    def __init__(self, gamma, sinDec_range=(-1., 1.), sinDec_bandwidth=0.1,
+                 e_range=(0., np.inf), E0=1., GeV=1., seed=None):
+        super(PointSourceInjector, self).__init__()
 
-    _E0 = 1.
-    _GeV = 1.e3
-    _e_range = [0., np.inf]
-
-    _random = np.random.RandomState()
-    _seed = None
-
-    def __init__(self, gamma, **kwargs):
-        r"""Constructor. Initialize the Injector class with basic
-        characteristics regarding a point source.
-
-        Parameters
-        -----------
-        gamma : float
-            Spectral index, positive values for falling spectra
-
-        kwargs : dict
-            Set parameters of class different to default
-
-        """
-
-        # source properties
         self.gamma = gamma
 
-        # Set all other attributes passed to the class
-        set_pars(self, **kwargs)
+        self.sinDec_range = sinDec_range
+        self.sinDec_bandwidth = sinDec_bandwidth
+        self.src_dec = np.nan
 
-        return
+        self.e_range = e_range
+
+        self.E0 = E0
+        self.GeV = GeV
+
+        self.random = np.random.RandomState(seed)
 
     def __str__(self):
-        r"""String representation showing some more or less useful information
-        regarding the Injector class.
+        lines = [repr(self)]
+        lines.append(67 * "-")
 
-        """
-        sout = ("\n{0:s}\n"+
-                67*"-"+"\n"+
-                "\tSpectral index     : {1:6.2f}\n"+
-                "\tSource declination : {2:5.1f} deg\n"
-                "\tlog10 Energy range : {3:5.1f} to {4:5.1f}\n").format(
-                         self.__repr__(),
-                         self.gamma, np.degrees(self.src_dec),
-                         *self.e_range)
-        sout += 67*"-"
+        lines.append(
+            "\tSpectral index     : {0:6.2f}\n"
+            "\tSource declination : {1:5.1f} deg\n"
+            "\tlog10 Energy range : {2:5.1f} to {3:5.1f}".format(
+                self.gamma, np.degrees(self.src_dec), *self.e_range))
 
-        return sout
+        lines.append(67 * "-")
 
-    @property
-    def sinDec_range(self):
-        return self._sinDec_range
-
-    @sinDec_range.setter
-    def sinDec_range(self, val):
-        if len(val) != 2:
-            raise ValueError("SinDec range needs only upper and lower bound!")
-        if val[0] < -1 or val[1] > 1:
-            logger.warn("SinDec bounds out of [-1, 1], clip to that values")
-            val[0] = max(val[0], -1)
-            val[1] = min(val[1], 1)
-        if np.diff(val) <= 0:
-            raise ValueError("SinDec range has to be increasing")
-        self._sinDec_range = [float(val[0]), float(val[1])]
-        return
-
-    @property
-    def e_range(self):
-        return self._e_range
-
-    @e_range.setter
-    def e_range(self, val):
-        if len(val) != 2:
-            raise ValueError("Energy range needs upper and lower bound!")
-        if val[0] < 0. or val[1] < 0:
-            logger.warn("Energy range has to be non-negative")
-            val[0] = max(val[0], 0)
-            val[1] = max(val[1], 0)
-        if np.diff(val) <= 0:
-            raise ValueError("Energy range has to be increasing")
-        self._e_range = [float(val[0]), float(val[1])]
-        return
-
-    @property
-    def GeV(self):
-        return self._GeV
-
-    @GeV.setter
-    def GeV(self, value):
-        self._GeV = float(value)
-
-        return
-
-    @property
-    def E0(self):
-        return self._E0
-
-    @E0.setter
-    def E0(self, value):
-        self._E0 = float(value)
-
-        return
-
-    @property
-    def random(self):
-        return self._random
-
-    @random.setter
-    def random(self, value):
-        self._random = value
-
-        return
-
-    @property
-    def seed(self):
-        return self._seed
-
-    @seed.setter
-    def seed(self, val):
-        logger.info("Setting global seed to {0:d}".format(int(val)))
-        self._seed = int(val)
-        self.random = np.random.RandomState(self.seed)
-
-        return
-
-    @property
-    def sinDec_bandwidth(self):
-        return self._sinDec_bandwidth
-
-    @sinDec_bandwidth.setter
-    def sinDec_bandwidth(self, val):
-        if val < 0. or val > 1:
-            logger.warn("Sin Declination bandwidth {0:2e} not valid".format(
-                            val))
-            val = min(1., np.fabs(val))
-        self._sinDec_bandwidth = float(val)
-
-        self._setup()
-
-        return
-
-    @property
-    def src_dec(self):
-        return self._src_dec
-
-    @src_dec.setter
-    def src_dec(self, val):
-        if not np.fabs(val) < np.pi / 2.:
-            logger.warn("Source declination {0:2e} not in pi range".format(
-                            val))
-            return
-        if not (np.sin(val) > self.sinDec_range[0]
-                and np.sin(val) < self.sinDec_range[1]):
-            logger.error("Injection declination not in sinDec_range!")
-        self._src_dec = float(val)
-
-        self._setup()
-
-        return
+        return "\n".join(lines)
 
     def _setup(self):
-        r"""If one of *src_dec* or *dec_bandwidth* is changed or set, solid
-        angles and declination bands have to be re-set.
+        r"""Reset solid angle and declination band.
 
         """
-
-        A, B = self._sinDec_range
+        A, B = self.sinDec_range
 
         m = (A - B + 2. * self.sinDec_bandwidth) / (A - B)
         b = self.sinDec_bandwidth * (A + B) / (B - A)
@@ -329,67 +219,83 @@ class PointSourceInjector(Injector):
         self._min_dec = np.arcsin(min_sinDec)
         self._max_dec = np.arcsin(max_sinDec)
 
-        # solid angle of selected events
+        # Solid angle of selected events
         self._omega = 2. * np.pi * (max_sinDec - min_sinDec)
 
-        return
-
     def _weights(self):
-        r"""Setup weights for given models.
+        r"""Setup weights for assuming a power-law flux.
 
         """
-        # weights given in days, weighted to the point source flux
+        # Weights given in days; weighted to the point source flux
         self.mc_arr["ow"] *= self.mc_arr["trueE"]**(-self.gamma) / self._omega
-
         self._raw_flux = np.sum(self.mc_arr["ow"], dtype=np.float)
 
-        # normalized weights for probability
+        # Normalize weights.
         self._norm_w = self.mc_arr["ow"] / self._raw_flux
 
-        # double-check if no weight is dominating the sample
+        # Double-check if no weight is dominating the sample.
         if self._norm_w.max() > 0.1:
-            logger.warn("Warning: Maximal weight exceeds 10%: {0:7.2%}".format(
-                            self._norm_w.max()))
-
-        return
+            self._logging.warn("Maximal weight exceeds 10%: {0:.2%}".format(
+                self._norm_w.max()))
 
     def fill(self, src_dec, mc, livetime):
-        r"""Fill the Injector with MonteCarlo events selecting events around
-        the source position(s).
+        r"""Fill injector with Monte Carlo events, selecting events
+        around the source position.
 
         Parameters
         -----------
-        src_dec : float, array-like
-            Source location(s)
-        mc : recarray, dict of recarrays with sample enum as key (MultiPointSourceLLH)
-            Monte Carlo events
-        livetime : float, dict of floats
+        src_dec : float
+            Declination of source position
+        mc : ndarray, dict(enum, ndarray)
+            Either structured array describing Monte Carlo events or a
+            mapping of `enum` to such arrays
+        livetime : float, dict(enum, float)
             Livetime per sample
 
+        Raises
+        ------
+        TypeError
+            If `mc` and `livetime` are not of the same type.
+
+        See Also
+        --------
+        psLLH.MultiPointSourceLLH
+
         """
-
         if isinstance(mc, dict) ^ isinstance(livetime, dict):
-            raise ValueError("mc and livetime not compatible")
+            raise TypeError("mc and livetime are not compatible.")
 
+        # Reset solid angle and declination band.
         self.src_dec = src_dec
+        self._setup()
+
+        dtype = [
+            ("idx", np.int), ("enum", np.int),
+            ("trueE", np.float), ("ow", np.float)
+            ]
+
+        self.mc_arr = np.empty(0, dtype=dtype)
 
         self.mc = dict()
-        self.mc_arr = np.empty(0, dtype=[("idx", np.int), ("enum", np.int),
-                                         ("trueE", np.float), ("ow", np.float)])
 
         if not isinstance(mc, dict):
             mc = {-1: mc}
             livetime = {-1: livetime}
 
         for key, mc_i in mc.iteritems():
-            # get MC event's in the selected energy and sinDec range
-            band_mask = ((np.sin(mc_i["trueDec"]) > np.sin(self._min_dec))
-                         &(np.sin(mc_i["trueDec"]) < np.sin(self._max_dec)))
-            band_mask &= ((mc_i["trueE"] / self.GeV > self.e_range[0])
-                          &(mc_i["trueE"] / self.GeV < self.e_range[1]))
+            # Get MC events in the selected energy and sine declination range.
+            band_mask = np.logical_and(
+                np.sin(mc_i["trueDec"]) > np.sin(self._min_dec),
+                np.sin(mc_i["trueDec"]) < np.sin(self._max_dec))
+
+            band_mask &= np.logical_and(
+                mc_i["trueE"] / self.GeV > self.e_range[0],
+                mc_i["trueE"] / self.GeV < self.e_range[1])
 
             if not np.any(band_mask):
-                print("Sample {0:d}: No events were selected!".format(key))
+                self._logging.warn(
+                    "Sample {0:d}: no events were selected.".format(key))
+
                 self.mc[key] = mc_i[band_mask]
 
                 continue
@@ -405,100 +311,80 @@ class PointSourceInjector(Injector):
 
             self.mc_arr = np.append(self.mc_arr, mc_arr)
 
-            print("Sample {0:s}: Selected {1:6d} events at {2:7.2f}deg".format(
-                        str(key), N, np.degrees(self.src_dec)))
+            self._logging.info(
+                "Sample {0}: selected {1:d} events at {2:.2f} deg.".format(
+                    key, N, np.degrees(src_dec)))
 
         if len(self.mc_arr) < 1:
             raise ValueError("Select no events at all")
 
-        print("Selected {0:d} events in total".format(len(self.mc_arr)))
+        self._logging.info("Selected {0:d} events in total.".format(
+            len(self.mc_arr)))
 
         self._weights()
 
-        return
-
     def flux2mu(self, flux):
-        r"""Convert a flux to mean number of expected events.
-
-        Converts a flux :math:`\Phi_0` to the mean number of expected
-        events using the spectral index :math:`\gamma`, the
-        specified energy unit `x GeV` and the point of normalization `E0`.
-
-        The flux is calculated as follows:
-
-        .. math::
-
-            \frac{d\Phi}{dE}=\Phi_0\,E_0^{2-\gamma}
-                                \left(\frac{E}{E_0}\right)^{-\gamma}
-
-        In this way, the flux will be equivalent to a power law with
-        index of -2 at the normalization energy `E0`.
-
-        """
-
-        gev_flux = (flux
-                        * (self.E0 * self.GeV)**(self.gamma - 1.)
-                        * (self.E0)**(self.gamma - 2.))
+        gev_flux = flux * (self.E0 * self.GeV)**(self.gamma - 1.) *\
+            self.E0**(self.gamma - 2.)
 
         return self._raw_flux * gev_flux
 
+    flux2mu.__doc__ = Injector.flux2mu.__doc__
+
     def mu2flux(self, mu):
-        r"""Calculate the corresponding flux in [*GeV*^(gamma - 1) s^-1 cm^-2]
-        for a given number of mean source events.
-
-        """
-
         gev_flux = mu / self._raw_flux
 
-        return (gev_flux
-                    * self.GeV**(1. - self.gamma) # turn from I3Unit to *GeV*
-                    * self.E0**(2. - self.gamma)) # go from 1*GeV* to E0
+        flux = gev_flux * self.GeV**(1. - self.gamma) *\
+            self.E0**(2. - self.gamma)
+
+        return flux
+
+    mu2flux.__doc__ = Injector.mu2flux.__doc__
 
     def sample(self, src_ra, mean_mu, poisson=True):
-        r""" Generator to get sampled events for a Point Source location.
+        r"""Sample events for given source location.
 
         Parameters
         -----------
+        src_ra : float
+            Right ascension of source position
         mean_mu : float
             Mean number of events to sample
+        poisson : bool, optional
+            Use Poisson fluctuations, otherwise sample `mean_mu`.
 
         Returns
         --------
         num : int
             Number of events
         sam_ev : iterator
-            sampled_events for each loop iteration, either as simple array or
-            as dictionary for each sample
-
-        Optional Parameters
-        --------------------
-        poisson : bool
-            Use poisson fluctuations, otherwise sample exactly *mean_mu*
+            Sampled events for each loop iteration; either as simple
+            array or as dictionary for each sample
 
         """
-
-        # generate event numbers using poissonian events
         while True:
-            num = (self.random.poisson(mean_mu)
-                        if poisson else int(np.around(mean_mu)))
+            # Generate event numbers using Poisson events.
+            if poisson:
+                num = self.random.poisson(mean_mu)
+            else:
+                num = int(np.around(mean_mu))
 
-            logger.debug(("Generated number of sources: {0:3d} "+
-                          "of mean {1:5.1f} sources").format(num, mean_mu))
+            self._logging.info("Mean number of events {0:.1f}".format(mean_mu))
+            self._logging.info("Generated number of events {0:d}".format(num))
 
-            # if no events should be sampled, return nothing
             if num < 1:
+                # No events will be sampled.
                 yield num, None
                 continue
 
             sam_idx = self.random.choice(self.mc_arr, size=num, p=self._norm_w)
 
-            # get the events that were sampled
+            # Get the events that were sampled.
             enums = np.unique(sam_idx["enum"])
 
             if len(enums) == 1 and enums[0] < 0:
-                # only one sample, just return recarray
+                # Only one event will be sampled.
                 sam_ev = np.copy(self.mc[enums[0]][sam_idx["idx"]])
-
                 yield num, rotate_struct(sam_ev, src_ra, self.src_dec)
                 continue
 
@@ -512,90 +398,62 @@ class PointSourceInjector(Injector):
 
 
 class ModelInjector(PointSourceInjector):
-    r"""PointSourceInjector that weights events according to a specific model
-    flux.
+    r"""Model-dependent point source injector
 
-    Fluxes are measured in percent of the input flux.
+    Inject events according to a specific neutrino flux model. Fluxes
+    are measured in percent of the input flux.
+
+    Parameters
+    -----------
+    logE : array_like
+        Bins in base 10 logarithm of energy; energy should be given in
+        units of `GeV` GeV.
+    logFlux : array_like
+        Base 10 logarithm of flux; flux should be given in units `GeV`
+        GeV cm^{-2} s^{-1}.
+    deg : int, optional
+        Degree of smoothing spline; must be ``1 <= deg <= 5``.
+    \*\*kwargs
+        Parameters passed to base class
 
     """
+    def __init__(self, logE, logFlux, gamma, deg=4, **kwargs):
+        # Make sure that energy bins are of increasing order.
+        sorter = np.argsort(logE)
+        energy = logE[sorter]
+        flux = logFlux[sorter]
 
-    def __init__(self, logE, logFlux, *args, **kwargs):
-        r"""Constructor, setting up the weighting function.
-
-        Parameters
-        -----------
-        logE : array
-            Flux Energy in units log(*self.GeV*)
-
-        logFlux : array
-            Flux in units log(*self.GeV* / cm^2 s), i.e. log(E^2 dPhi/dE)
-
-        Other Parameters
-        -----------------
-        deg : int
-            Degree of polynomial for flux parametrization
-
-        args, kwargs
-            Passed to PointSourceInjector
-
-        """
-
-        deg = kwargs.pop("deg", _deg)
-        ext = kwargs.pop("ext", _ext)
-
-        s = np.argsort(logE)
-        logE = logE[s]
-        logFlux = logFlux[s]
-        diff = np.argwhere(np.diff(logE) > 0)
-        logE = logE[diff]
-        logFlux = logFlux[diff]
+        # Make sure that energy bins contain only unique values.
+        unique = np.argwhere(np.diff(energy) > 0.)
+        energy = energy[unique]
+        flux = flux[unique]
 
         self._spline = scipy.interpolate.InterpolatedUnivariateSpline(
-                            logE, logFlux, k=deg)
+            energy, flux, k=deg)
 
-        # use default energy range of the flux parametrization
+        # Use default energy range of flux parametrization.
         kwargs.setdefault("e_range", [10.**np.amin(logE), 10.**np.amax(logE)])
 
-        # Set all other attributes passed to the class
-        set_pars(self, **kwargs)
-
-        return
+        super(ModelInjector, self).__init__(gamma, **kwargs)
 
     def _weights(self):
-        r"""Calculate weights, according to given flux parametrization.
+        mcenergy = np.log10(self.mc_arr["trueE"]) - np.log10(self.GeV)
+        flux = self._spline(mcenergy)
+        flux = np.power(10., flux - 2. * mcenergy) / self.GeV
 
-        """
-
-        trueLogGeV = np.log10(self.mc_arr["trueE"]) - np.log10(self.GeV)
-
-        logF = self._spline(trueLogGeV)
-        flux = np.power(10., logF - 2. * trueLogGeV) / self.GeV
-
-        # remove NaN's, etc.
-        m = (flux > 0.) & np.isfinite(flux)
-        self.mc_arr = self.mc_arr[m]
-
-        # assign flux to OneWeight
-        self.mc_arr["ow"] *= flux[m] / self._omega
+        mask = (flux > 0.) & np.isfinite(flux)
+        self.mc_arr = self.mc_arr[mask]
+        self.mc_arr["ow"] *= flux[mask] / self._omega
 
         self._raw_flux = np.sum(self.mc_arr["ow"], dtype=np.float)
-
         self._norm_w = self.mc_arr["ow"] / self._raw_flux
 
-        return
-
     def flux2mu(self, flux):
-        r"""Convert a flux to number of expected events.
-
-        """
-
         return self._raw_flux * flux
 
+    flux2mu.__doc__ = PointSourceInjector.flux2mu.__doc__
+
     def mu2flux(self, mu):
-        r"""Convert a mean number of expected events to a flux.
+        return mu / self._raw_flux
 
-        """
-
-        return float(mu) / self._raw_flux
-
-
+    mu2flux.__doc__ = PointSourceInjector.mu2flux.__doc__

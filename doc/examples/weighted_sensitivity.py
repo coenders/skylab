@@ -2,22 +2,19 @@
 
 from __future__ import print_function
 
-# SciPy
-from scipy.stats import chi2
-import healpy as hp
+import logging
+import os
+
 import numpy as np
-from scipy.signal import convolve2d
 
-# skylab
 from skylab.ps_injector import PointSourceInjector
-from skylab.psLLH import MultiPointSourceLLH
 from skylab.ps_model import UniformLLH
-from skylab.utils import poisson_weight
 
-# local
 import utils
 
-if __name__=="__main__":
+logging.getLogger("skylab.psLLH.PointSourceLLH").setLevel(logging.INFO)
+
+if __name__ == "__main__":
     plt = utils.plotting(backend="pdf")
 
     llh, mc = utils.startup()
@@ -34,27 +31,26 @@ if __name__=="__main__":
         if not energy:
             l += "o"
 
-            llh.llh_model = (UniformLLH(sinDec_bins=max(3, len(llh.exp) // 200),
-                                        sinDec_range=[-1., 1.]),
-                             mc)
+            model = UniformLLH(
+                sinDec_bins=max(3, len(llh.exp) // 200),
+                sinDec_range=[-1., 1.])
 
-        props = dict()
+            llh.set_llh_model(model, mc)
+
+        ts = None
         sens = list()
         disc = list()
         for j, gamma in enumerate(Gamma):
             # init a injector class sampling events at a point source
             inj = PointSourceInjector(gamma, sinDec_bandwidth=1.)
+            inj.fill(0., mc, llh.livetime)
 
             # start calculation for dec = 0
-            result = llh.weighted_sensitivity(0., [0.5, 2.87e-7], [0.9, 0.5],
-                                              inj, mc,
-                                              n_bckg=10000,
-                                              n_iter=1000,
-                                              eps=1.e-2,
-                                              **props)
+            result = llh.weighted_sensitivity(
+                np.pi, 0., [0.5, 2.87e-7], [0.9, 0.5], inj, TSval=ts,
+                n_iter=1000, n_bckg=10000, eps=1e-2)[0]
 
-            props["TSval"] = result["TSval"]
-
+            ts = result["TS"]
             sens.append(result["mu"][0])
             disc.append(result["mu"][1])
 
@@ -68,7 +64,9 @@ if __name__=="__main__":
 
     ax.legend(loc="best")
 
+    if not os.path.exists("figures"):
+        os.makedirs("figures")
+
     fig.savefig("figures/nevents.pdf")
 
     plt.show()
-
